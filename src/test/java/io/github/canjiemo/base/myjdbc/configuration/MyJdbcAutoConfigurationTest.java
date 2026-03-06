@@ -88,6 +88,7 @@ class MyJdbcAutoConfigurationTest {
     @DisplayName("默认 Bean 工厂方法应声明为可覆盖")
     void defaultBeanFactoryMethodsShouldBeConditionalOnMissingBean() throws Exception {
         assertConditionalOnMissingBean("baseService", IBaseDao.class, JdbcTemplate.class, NamedParameterJdbcTemplate.class);
+        assertConditionalOnMissingBean("tableCacheManager");
         assertConditionalOnMissingBean("tableInfoBuilder");
         assertConditionalOnMissingBean("baseDao", MyJdbcProperties.class, NamedParameterJdbcTemplate.class, SqlBuilder.class);
         assertConditionalOnMissingBean("sqlBuilder", DataSource.class);

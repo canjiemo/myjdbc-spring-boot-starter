@@ -277,9 +277,14 @@ public class BaseDaoImpl implements IBaseDao {
 				includeTenantCondition ? QueryRewriteMode.DELETE_AND_TENANT : QueryRewriteMode.DELETE_ONLY);
 	}
 
-	int getQueryRewriteCacheSize() {
-		return queryRewriteCache.size();
-	}
+	/** SQL 改写缓存当前条目数。 */
+	public int getQueryRewriteCacheSize() { return queryRewriteCache.size(); }
+
+	/** SQL 改写缓存累计命中次数。 */
+	public long getQueryRewriteCacheHits() { return queryRewriteCache.getHitCount(); }
+
+	/** SQL 改写缓存累计未命中次数。 */
+	public long getQueryRewriteCacheMisses() { return queryRewriteCache.getMissCount(); }
 
 	private String rewriteQuerySql(String sql, QueryRewriteMode mode) {
 		if (sql == null || sql.isBlank()) {
@@ -649,6 +654,8 @@ public class BaseDaoImpl implements IBaseDao {
 	private static final class SqlRewriteCache {
 		private final int maxSize;
 		private final LinkedHashMap<RewriteCacheKey, String> delegate;
+		private final java.util.concurrent.atomic.AtomicLong hitCount  = new java.util.concurrent.atomic.AtomicLong();
+		private final java.util.concurrent.atomic.AtomicLong missCount = new java.util.concurrent.atomic.AtomicLong();
 
 		private SqlRewriteCache(int maxSize) {
 			this.maxSize = Math.max(1, maxSize);
@@ -664,9 +671,11 @@ public class BaseDaoImpl implements IBaseDao {
 			synchronized (this) {
 				String cached = delegate.get(key);
 				if (cached != null) {
+					hitCount.incrementAndGet();
 					return cached;
 				}
 			}
+			missCount.incrementAndGet();
 			String loaded = loader.apply(key);
 			synchronized (this) {
 				String cached = delegate.get(key);
@@ -678,9 +687,9 @@ public class BaseDaoImpl implements IBaseDao {
 			}
 		}
 
-		synchronized int size() {
-			return delegate.size();
-		}
+		synchronized int size() { return delegate.size(); }
+		long getHitCount()      { return hitCount.get(); }
+		long getMissCount()     { return missCount.get(); }
 	}
 
 }

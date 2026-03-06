@@ -2,6 +2,7 @@ package io.github.canjiemo.base.myjdbc.configuration;
 
 import io.github.canjiemo.base.myjdbc.builder.SqlBuilder;
 import io.github.canjiemo.base.myjdbc.builder.TableInfoBuilder;
+import io.github.canjiemo.base.myjdbc.cache.TableCacheManager;
 import io.github.canjiemo.base.myjdbc.dao.IBaseDao;
 import io.github.canjiemo.base.myjdbc.dao.impl.BaseDaoImpl;
 import io.github.canjiemo.base.myjdbc.service.IBaseService;
@@ -47,6 +48,12 @@ public class MyJdbcAutoConfiguration {
     public BaseServiceImpl baseService(IBaseDao baseDao, JdbcTemplate jdbcTemplate,
                                        NamedParameterJdbcTemplate namedParameterJdbcTemplate){
         return new BaseServiceImpl();
+    }
+
+    @Bean
+    @ConditionalOnMissingBean(TableCacheManager.class)
+    public TableCacheManager tableCacheManager() {
+        return TableCacheManager.getInstance();
     }
 
     @Bean

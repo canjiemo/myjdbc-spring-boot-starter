@@ -1,2 +1,6 @@
 org.springframework.boot.autoconfigure.EnableAutoConfiguration=\
-io.github.canjiemo.base.myjdbc.configuration.MyJdbcAutoConfiguration
+  io.github.canjiemo.base.myjdbc.configuration.MyJdbcAutoConfiguration,\
+  io.github.canjiemo.base.myjdbc.configuration.MyJdbcMetricsAutoConfiguration
+
+org.springframework.boot.diagnostics.FailureAnalyzer=\
+  io.github.canjiemo.base.myjdbc.configuration.MyJdbcInitFailureAnalyzer
