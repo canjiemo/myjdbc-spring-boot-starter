@@ -6,18 +6,12 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.InitializingBean;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.core.Ordered;
-import org.springframework.stereotype.Component;
 
 /**
  * 模式验证运行器
  * 在Bean初始化阶段执行数据库模式验证，确保最高优先级
  */
-@Component
-@ConditionalOnBean(DatabaseSchemaValidator.class)
-@ConditionalOnProperty(name = "myjdbc.validate-schema", havingValue = "true", matchIfMissing = true)
 public class SchemaValidationRunner implements InitializingBean, Ordered {
     
     private static final Logger log = LoggerFactory.getLogger(SchemaValidationRunner.class);

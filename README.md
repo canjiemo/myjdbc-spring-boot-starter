@@ -111,6 +111,7 @@ WHERE u.delete_flag = 0
 
 ### 🔍 表结构校验
 - 启动时自动校验实体类与数据库表结构一致性
+- 校验范围基于当前连接的 schema（如 PostgreSQL `current_schema()`）
 - 发现不匹配时输出警告信息
 - 支持通过配置开启/关闭
 
@@ -124,7 +125,7 @@ WHERE u.delete_flag = 0
 <dependency>
     <groupId>io.github.canjiemo</groupId>
     <artifactId>myjdbc-spring-boot-starter</artifactId>
-    <version>1.0-jdk21</version>
+    <version>1.0.2-jdk21</version>
 </dependency>
 ```
 
@@ -178,6 +179,9 @@ spring:
     username: root
     password: password
     driver-class-name: com.mysql.cj.jdbc.Driver
+
+    # PostgreSQL / Kingbase 使用非默认 schema 时，建议在数据源层设置
+    # url: jdbc:postgresql://localhost:5432/mydb?currentSchema=edu
 
 # 可选配置
 myjdbc:
@@ -240,6 +244,10 @@ myjdbc:
 1. 标注 `@MyTable`
 2. 实现 `MyTableEntity` 接口
 
+说明：
+- `@MyTable.value` 只写裸表名，不在注解里声明 schema
+- 非默认 schema 由数据源决定，例如 PostgreSQL 通过 JDBC URL 的 `currentSchema` 或数据库 `search_path`
+
 ```java
 import io.github.canjiemo.base.myjdbc.MyTableEntity;
 import io.github.canjiemo.base.myjdbc.annotation.MyTable;
@@ -270,6 +278,8 @@ public class UserPO implements MyTableEntity {
 ```
 
 > **说明：** 若字段名符合驼峰转下划线规则（如 `userName` → `user_name`），无需标注 `@MyField`，框架自动转换。
+>
+> **补充：** 逻辑删除是否生效取决于当前 schema 下真实表结构中是否存在 `delColumn` 对应的列；若表中不存在该列，启动校验会自动跳过逻辑删除拼接。
 
 ### 创建 Service
 

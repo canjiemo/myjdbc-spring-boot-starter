@@ -1,9 +1,9 @@
 package io.github.canjiemo.base.myjdbc.lambda;
 
-import io.github.mocanjie.base.mycommon.pager.Pager;
 import io.github.canjiemo.base.myjdbc.MyTableEntity;
 import io.github.canjiemo.base.myjdbc.cache.TableCacheManager;
 import io.github.canjiemo.base.myjdbc.dao.IBaseDao;
+import io.github.canjiemo.mycommon.pager.Pager;
 
 import java.util.*;
 

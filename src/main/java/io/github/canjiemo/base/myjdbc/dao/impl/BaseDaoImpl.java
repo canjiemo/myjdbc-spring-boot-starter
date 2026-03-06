@@ -1,7 +1,5 @@
 package io.github.canjiemo.base.myjdbc.dao.impl;
 
-import io.github.mocanjie.base.mycommon.exception.BusinessException;
-import io.github.mocanjie.base.mycommon.pager.Pager;
 import io.github.canjiemo.base.myjdbc.MyTableEntity;
 import io.github.canjiemo.base.myjdbc.builder.SqlBuilder;
 import io.github.canjiemo.base.myjdbc.builder.TableInfoBuilder;
@@ -16,6 +14,8 @@ import io.github.canjiemo.base.myjdbc.rowmapper.MyBeanPropertyRowMapper;
 import io.github.canjiemo.base.myjdbc.tenant.TenantAwareSqlParameterSource;
 import io.github.canjiemo.base.myjdbc.tenant.TenantContext;
 import io.github.canjiemo.base.myjdbc.tenant.TenantIdProvider;
+import io.github.canjiemo.mycommon.exception.BusinessException;
+import io.github.canjiemo.mycommon.pager.Pager;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.BeanUtils;
@@ -28,18 +28,12 @@ import org.springframework.jdbc.core.namedparam.*;
 import org.springframework.jdbc.support.GeneratedKeyHolder;
 import org.springframework.jdbc.support.KeyHolder;
 import org.springframework.lang.Nullable;
-import org.springframework.stereotype.Component;
 
 import java.io.Serializable;
 import java.lang.reflect.Field;
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Locale;
-import java.util.Map;
+import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 
-@Component
 public class BaseDaoImpl implements IBaseDao {
 
 	protected static Logger log = LoggerFactory.getLogger(BaseDaoImpl.class);

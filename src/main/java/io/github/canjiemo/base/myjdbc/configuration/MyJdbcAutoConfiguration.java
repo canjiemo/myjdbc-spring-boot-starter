@@ -11,25 +11,28 @@ import io.github.canjiemo.base.myjdbc.validation.SchemaValidationRunner;
 import jakarta.annotation.PostConstruct;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.config.BeanPostProcessor;
+import org.springframework.boot.autoconfigure.AutoConfiguration;
+import org.springframework.boot.autoconfigure.AutoConfigureAfter;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnClass;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.boot.logging.LogLevel;
 import org.springframework.boot.logging.LoggingSystem;
-import org.springframework.core.env.Environment;
 import org.springframework.context.annotation.Bean;
-import org.springframework.context.annotation.Configuration;
-import org.springframework.context.annotation.Primary;
 import org.springframework.core.Ordered;
 import org.springframework.core.annotation.Order;
+import org.springframework.core.env.Environment;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 
 import javax.sql.DataSource;
 
-@Configuration
+@AutoConfiguration
+@AutoConfigureAfter(MyJdbcTemplateAutoConfiguration.class)
 @EnableConfigurationProperties(MyJdbcProperties.class)
-public class MyJdbcAutoConfiguration implements BeanPostProcessor, Ordered {
+public class MyJdbcAutoConfiguration {
     private static final Logger log = LoggerFactory.getLogger(MyJdbcAutoConfiguration.class);
 
     private final MyJdbcProperties properties;
@@ -41,44 +44,52 @@ public class MyJdbcAutoConfiguration implements BeanPostProcessor, Ordered {
     }
 
     @Bean
-    @Primary
-    public IBaseService getBaseService(){
+    @ConditionalOnBean({JdbcTemplate.class, NamedParameterJdbcTemplate.class})
+    @ConditionalOnMissingBean(IBaseService.class)
+    public BaseServiceImpl baseService(IBaseDao baseDao, JdbcTemplate jdbcTemplate,
+                                       NamedParameterJdbcTemplate namedParameterJdbcTemplate){
         return new BaseServiceImpl();
     }
 
     @Bean
-    @Primary
-    public TableInfoBuilder getTableInfoBuilder(){
+    @ConditionalOnMissingBean(TableInfoBuilder.class)
+    public TableInfoBuilder tableInfoBuilder(){
         return new TableInfoBuilder();
     }
 
     @Bean
-    @Primary
-    public IBaseDao getBaseDaoImpl(MyJdbcProperties properties){
+    @ConditionalOnBean(NamedParameterJdbcTemplate.class)
+    @ConditionalOnMissingBean(IBaseDao.class)
+    public BaseDaoImpl baseDao(MyJdbcProperties properties, NamedParameterJdbcTemplate namedParameterJdbcTemplate){
         return new BaseDaoImpl(properties);
     }
 
     @Bean
-    @Primary
     @ConditionalOnClass(DataSource.class)
-    public SqlBuilder getSqlBuilder(){
+    @ConditionalOnMissingBean(SqlBuilder.class)
+    public SqlBuilder sqlBuilder(){
         return new SqlBuilder();
     }
     
     @Bean
     @Order(Ordered.HIGHEST_PRECEDENCE)
+    @ConditionalOnBean({JdbcTemplate.class, DataSource.class})
     @ConditionalOnProperty(name = "myjdbc.validate-schema", havingValue = "true", matchIfMissing = true)
     @ConditionalOnClass({DataSource.class, JdbcTemplate.class})
-    public DatabaseSchemaValidator getDatabaseSchemaValidator(JdbcTemplate jdbcTemplate, DataSource dataSource,
-                                                              MyJdbcProperties properties){
+    @ConditionalOnMissingBean(DatabaseSchemaValidator.class)
+    public DatabaseSchemaValidator databaseSchemaValidator(JdbcTemplate jdbcTemplate, DataSource dataSource,
+                                                           MyJdbcProperties properties){
         return new DatabaseSchemaValidator(jdbcTemplate, dataSource, properties);
     }
     
     @Bean
     @Order(Ordered.HIGHEST_PRECEDENCE + 1)
+    @ConditionalOnBean(DatabaseSchemaValidator.class)
     @ConditionalOnProperty(name = "myjdbc.validate-schema", havingValue = "true", matchIfMissing = true)
     @ConditionalOnClass({DataSource.class, JdbcTemplate.class})
-    public SchemaValidationRunner getSchemaValidationRunner(MyJdbcProperties properties){
+    @ConditionalOnMissingBean(SchemaValidationRunner.class)
+    public SchemaValidationRunner schemaValidationRunner(MyJdbcProperties properties,
+                                                         DatabaseSchemaValidator databaseSchemaValidator){
         return new SchemaValidationRunner(properties);
     }
 
@@ -156,11 +167,5 @@ public class MyJdbcAutoConfiguration implements BeanPostProcessor, Ordered {
             return defaultValue;
         }
         return value.trim();
-    }
-
-
-    @Override
-    public int getOrder() {
-        return Integer.MIN_VALUE;
     }
 }

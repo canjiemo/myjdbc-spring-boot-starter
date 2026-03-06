@@ -1,7 +1,7 @@
 package io.github.canjiemo.base.myjdbc.metadata;
 
-import io.github.mocanjie.base.mycommon.exception.BusinessException;
 import io.github.canjiemo.base.myjdbc.error.MyJdbcErrorCode;
+import io.github.canjiemo.mycommon.exception.BusinessException;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 

@@ -1,6 +1,6 @@
 package io.github.canjiemo.base.myjdbc.builder;
 
-import io.github.mocanjie.base.mycommon.pager.Pager;
+import io.github.canjiemo.mycommon.pager.Pager;
 import jakarta.annotation.PostConstruct;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;

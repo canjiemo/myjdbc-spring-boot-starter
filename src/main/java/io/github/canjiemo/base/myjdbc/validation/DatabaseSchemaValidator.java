@@ -263,7 +263,7 @@ public class DatabaseSchemaValidator implements Ordered {
             if (querySpec == null) {
                 return columns;
             }
-            log.debug("执行SQL查询获取列信息, dbType={}, table={}", databaseType, targetTableName);
+            log.debug("执行SQL查询获取列信息, dbType={}, table={}", databaseType, tableName);
 
             List<String> queryResult = jdbcTemplate.queryForList(querySpec.sql(), String.class, querySpec.args());
             for (String columnName : queryResult) {
@@ -314,6 +314,9 @@ public class DatabaseSchemaValidator implements Ordered {
     }
 
     private String normalizeTableNameByDatabase(String tableName) {
+        if (tableName == null || tableName.isBlank()) {
+            return tableName;
+        }
         switch (databaseType.toLowerCase()) {
             case "oracle":
                 return tableName.toUpperCase();
@@ -416,7 +419,7 @@ public class DatabaseSchemaValidator implements Ordered {
             return "generic";
         }
     }
-    
+
     /**
      * 获取所有缓存的表名
      */
@@ -432,7 +435,7 @@ public class DatabaseSchemaValidator implements Ordered {
     }
 
     private record QuerySpec(String sql, Object[] args) {}
-    
+
     /**
      * 从缓存中获取主键字段名
      */
@@ -452,7 +455,7 @@ public class DatabaseSchemaValidator implements Ordered {
             column.equalsIgnoreCase(targetColumn)
         );
     }
-    
+
     /**
      * 记录验证总结
      */

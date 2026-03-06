@@ -1,8 +1,9 @@
 package io.github.canjiemo.base.myjdbc.metadata;
 
-import io.github.mocanjie.base.mycommon.IdGen;
-import io.github.mocanjie.base.mycommon.exception.BusinessException;
+
 import io.github.canjiemo.base.myjdbc.error.MyJdbcErrorCode;
+import io.github.canjiemo.mycommon.IdGen;
+import io.github.canjiemo.mycommon.exception.BusinessException;
 import lombok.Data;
 import lombok.experimental.Accessors;
 import lombok.extern.slf4j.Slf4j;

@@ -28,6 +28,19 @@ public class MyReflectionUtils {
 
     }
 
+    public static Field findFieldInHierarchy(Class<?> aClass, String fieldName) {
+        if (aClass == null || fieldName == null || fieldName.isBlank()) {
+            return null;
+        }
+        for (Class<?> current = aClass; current != null && current != Object.class; current = current.getSuperclass()) {
+            try {
+                return current.getDeclaredField(fieldName);
+            } catch (NoSuchFieldException ignored) {
+            }
+        }
+        return null;
+    }
+
     public static List<Field> excludeOverrideSuperField(List<Field> fieldList, List<Field> superFieldList) {
         Map<String, Field> fieldMap = (Map)fieldList.stream().collect(Collectors.toMap(Field::getName, Function.identity()));
         superFieldList.stream().filter((field) -> {

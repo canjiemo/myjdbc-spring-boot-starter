@@ -1,9 +1,9 @@
 package io.github.canjiemo.base.myjdbc.test;
 
-import io.github.mocanjie.base.mycommon.pager.Pager;
 import io.github.canjiemo.base.myjdbc.builder.SqlBuilder;
 import io.github.canjiemo.base.myjdbc.cache.TableCacheManager;
 import io.github.canjiemo.base.myjdbc.parser.JSqlDynamicSqlParser;
+import io.github.canjiemo.mycommon.pager.Pager;
 import org.junit.jupiter.api.*;
 
 import static org.junit.jupiter.api.Assertions.*;

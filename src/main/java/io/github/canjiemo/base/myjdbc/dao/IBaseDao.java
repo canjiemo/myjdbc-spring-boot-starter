@@ -1,7 +1,7 @@
 package io.github.canjiemo.base.myjdbc.dao;
 
-import io.github.mocanjie.base.mycommon.pager.Pager;
 import io.github.canjiemo.base.myjdbc.MyTableEntity;
+import io.github.canjiemo.mycommon.pager.Pager;
 import org.springframework.lang.Nullable;
 
 import java.io.Serializable;

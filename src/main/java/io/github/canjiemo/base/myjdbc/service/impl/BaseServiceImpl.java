@@ -1,16 +1,15 @@
 package io.github.canjiemo.base.myjdbc.service.impl;
 
 
-import io.github.mocanjie.base.mycommon.pager.Pager;
 import io.github.canjiemo.base.myjdbc.MyTableEntity;
 import io.github.canjiemo.base.myjdbc.dao.IBaseDao;
 import io.github.canjiemo.base.myjdbc.lambda.LambdaQueryWrapper;
 import io.github.canjiemo.base.myjdbc.service.IBaseService;
+import io.github.canjiemo.mycommon.pager.Pager;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.lang.Nullable;
-import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.io.Serializable;
@@ -19,7 +18,6 @@ import java.util.Map;
 
 
 @Transactional(readOnly = true)
-@Service
 public class BaseServiceImpl implements IBaseService {
 
 	@Autowired

@@ -2,17 +2,24 @@ package io.github.canjiemo.base.myjdbc.parser;
 
 import io.github.canjiemo.base.myjdbc.annotation.MyField;
 import io.github.canjiemo.base.myjdbc.cache.TableCacheManager;
+import io.github.canjiemo.base.myjdbc.error.MyJdbcErrorCode;
 import io.github.canjiemo.base.myjdbc.metadata.TableInfo;
 import io.github.canjiemo.base.myjdbc.utils.CommonUtils;
+import io.github.canjiemo.mycommon.exception.BusinessException;
 import org.apache.commons.lang3.StringUtils;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.BeanUtils;
 
 import java.beans.PropertyDescriptor;
+import java.lang.reflect.Field;
 import java.util.Arrays;
 import java.util.LinkedList;
 import java.util.stream.Collectors;
 
 public class SqlParser {
+
+    private static final Logger log = LoggerFactory.getLogger(SqlParser.class);
 
     public static final String INSERT_SQL = "INSERT INTO %s(%s) VALUES (%s)";
     public static final String UPDATE_SQL = "UPDATE %s SET %s WHERE %s=:%s";
@@ -31,15 +38,10 @@ public class SqlParser {
             MyField annotation = f.getAnnotation(MyField.class);
             if(annotation!=null && !annotation.serialize()) return false;
             if(ignoreNull){
-                try {
-                    PropertyDescriptor propertyDescriptor = BeanUtils.getPropertyDescriptor(obj.getClass(), f.getName());
-                    Object value =  propertyDescriptor.getReadMethod().invoke(obj);
-                    if (value == null || String.valueOf(value).equalsIgnoreCase("null")) return false;
-                    if (value instanceof String) return StringUtils.isNotBlank((String) value);
-                    return true;
-                } catch (Exception e) {
-                }
-                return false;
+                Object value = getFieldValue(obj, f);
+                if (value == null || String.valueOf(value).equalsIgnoreCase("null")) return false;
+                if (value instanceof String) return StringUtils.isNotBlank((String) value);
+                return true;
             }else{
                 return true;
             }
@@ -59,20 +61,19 @@ public class SqlParser {
 
     public static String getUpdateSql(TableInfo tableInfo,Object obj,boolean ignoreNull,String... forceUpdateFields){
         String columns = tableInfo.getFieldList().stream().filter(f -> {
+            if (f.getName().equals(tableInfo.getPkFieldName())) {
+                return false;
+            }
             if(forceUpdateFields!=null && forceUpdateFields.length>0 && Arrays.asList(forceUpdateFields).contains(f.getName())){
                 return true;
             }
             MyField annotation = f.getAnnotation(MyField.class);
             if(annotation!=null && !annotation.serialize()) return false;
             if(ignoreNull){
-                try {
-                    PropertyDescriptor propertyDescriptor = BeanUtils.getPropertyDescriptor(obj.getClass(), f.getName());
-                    Object value =  propertyDescriptor.getReadMethod().invoke(obj);
-                    if (value == null || String.valueOf(value).equalsIgnoreCase("null")) return false;
-                    if (value instanceof String) return StringUtils.isNotBlank((String) value);
-                    return true;
-                } catch (Exception e) {}
-                return false;
+                Object value = getFieldValue(obj, f);
+                if (value == null || String.valueOf(value).equalsIgnoreCase("null")) return false;
+                if (value instanceof String) return StringUtils.isNotBlank((String) value);
+                return true;
             }else{
                 return true;
             }
@@ -92,6 +93,20 @@ public class SqlParser {
             return String.format("%s=:%s",colunm,fieldName);
         }).collect(Collectors.joining(","));
         return String.format(UPDATE_SQL,tableInfo.getTableName(),columns,tableInfo.getPkColumnName(),tableInfo.getPkFieldName());
+    }
+
+    private static Object getFieldValue(Object obj, Field field) {
+        try {
+            PropertyDescriptor propertyDescriptor = BeanUtils.getPropertyDescriptor(obj.getClass(), field.getName());
+            if (propertyDescriptor == null || propertyDescriptor.getReadMethod() == null) {
+                throw new IllegalStateException("missing getter");
+            }
+            return propertyDescriptor.getReadMethod().invoke(obj);
+        } catch (Exception e) {
+            String className = obj == null ? "null" : obj.getClass().getName();
+            log.error("读取实体字段失败: class={}, field={}", className, field.getName(), e);
+            throw new BusinessException(MyJdbcErrorCode.CONFIG_ERROR.userMessage());
+        }
     }
 
 

@@ -121,8 +121,9 @@ public class TableCacheManager {
      * 
      * @param basePackages 要扫描的基础包路径
      */
-    public static void initCache(String... basePackages) {
+    public static synchronized void initCache(String... basePackages) {
         log.info("开始扫描@MyTable注解的类并构建缓存...");
+        clearCache();
         
         try {
             for (String basePackage : basePackages) {
@@ -234,7 +235,9 @@ public class TableCacheManager {
      * @return 如果有删除条件配置返回true，否则返回false
      */
     public static boolean hasDeleteCondition(String tableName) {
-        return getDeleteInfoByTableName(tableName) != null;
+        DeleteInfo deleteInfo = getDeleteInfoByTableName(tableName);
+        return deleteInfo != null && deleteInfo.isValid()
+                && deleteInfo.getDelColumn() != null && !deleteInfo.getDelColumn().isBlank();
     }
     
     /**
@@ -244,7 +247,9 @@ public class TableCacheManager {
      * @return 如果有删除条件配置返回true，否则返回false
      */
     public static boolean hasDeleteCondition(Class<?> clazz) {
-        return getDeleteInfoByClass(clazz) != null;
+        DeleteInfo deleteInfo = getDeleteInfoByClass(clazz);
+        return deleteInfo != null && deleteInfo.isValid()
+                && deleteInfo.getDelColumn() != null && !deleteInfo.getDelColumn().isBlank();
     }
     
     /**
@@ -306,7 +311,7 @@ public class TableCacheManager {
     /**
      * 清空缓存
      */
-    public static void clearCache() {
+    public static synchronized void clearCache() {
         TABLE_DELETE_INFO_CACHE.clear();
         CLASS_DELETE_INFO_CACHE.clear();
         CLASS_TABLE_NAME_CACHE.clear();

@@ -1,11 +1,11 @@
 package io.github.canjiemo.base.myjdbc.builder;
 
-import io.github.mocanjie.base.mycommon.exception.BusinessException;
 import io.github.canjiemo.base.myjdbc.annotation.MyTable;
 import io.github.canjiemo.base.myjdbc.cache.TableCacheManager;
 import io.github.canjiemo.base.myjdbc.error.MyJdbcErrorCode;
 import io.github.canjiemo.base.myjdbc.metadata.TableInfo;
 import io.github.canjiemo.base.myjdbc.utils.MyReflectionUtils;
+import io.github.canjiemo.mycommon.exception.BusinessException;
 import jakarta.annotation.PostConstruct;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.config.BeanDefinition;
@@ -16,16 +16,19 @@ import org.springframework.core.type.filter.AnnotationTypeFilter;
 
 import java.lang.reflect.Field;
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 
 @Slf4j
 public class TableInfoBuilder implements BeanPostProcessor, Ordered {
 
-    private static final Map<Class<?>, TableInfo> tableInfoMap = new HashMap<>();
+    private static final Map<Class<?>, TableInfo> tableInfoMap = new ConcurrentHashMap<>();
     private static final Set<String> missingTableInfoLogged = java.util.concurrent.ConcurrentHashMap.newKeySet();
 
     @PostConstruct
     private void init() {
         log.info("初始化@MyTable信息...");
+        tableInfoMap.clear();
+        missingTableInfoLogged.clear();
         String osName = System.getProperty("os.name");
         log.info("系统信息:{}", osName);
 
@@ -59,11 +62,9 @@ public class TableInfoBuilder implements BeanPostProcessor, Ordered {
         for (Class<?> aClass : classSet) {
             log.info("{}", aClass.toString());
             MyTable annotation = aClass.getAnnotation(MyTable.class);
-            Field pkField;
-            try {
-                pkField = aClass.getDeclaredField(annotation.pkField());
-            } catch (NoSuchFieldException e) {
-                log.error("实体主键字段配置错误: class={}, pkField={}", aClass.getName(), annotation.pkField(), e);
+            Field pkField = MyReflectionUtils.findFieldInHierarchy(aClass, annotation.pkField());
+            if (pkField == null) {
+                log.error("实体主键字段配置错误: class={}, pkField={}", aClass.getName(), annotation.pkField());
                 throw new BusinessException(MyJdbcErrorCode.CONFIG_ERROR.userMessage());
             }
             TableInfo tableInfo = new TableInfo()

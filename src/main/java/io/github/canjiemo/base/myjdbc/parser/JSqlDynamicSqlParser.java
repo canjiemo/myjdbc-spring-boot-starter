@@ -2,13 +2,19 @@ package io.github.canjiemo.base.myjdbc.parser;
 
 import io.github.canjiemo.base.myjdbc.cache.TableCacheManager;
 import io.github.canjiemo.base.myjdbc.tenant.TenantContext;
-import net.sf.jsqlparser.expression.*;
+import net.sf.jsqlparser.expression.BinaryExpression;
+import net.sf.jsqlparser.expression.Expression;
+import net.sf.jsqlparser.expression.JdbcNamedParameter;
+import net.sf.jsqlparser.expression.LongValue;
 import net.sf.jsqlparser.expression.operators.conditional.AndExpression;
 import net.sf.jsqlparser.expression.operators.conditional.OrExpression;
 import net.sf.jsqlparser.expression.operators.relational.EqualsTo;
 import net.sf.jsqlparser.schema.Column;
 import net.sf.jsqlparser.schema.Table;
-import net.sf.jsqlparser.statement.select.*;
+import net.sf.jsqlparser.statement.select.Join;
+import net.sf.jsqlparser.statement.select.PlainSelect;
+import net.sf.jsqlparser.statement.select.Select;
+import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -316,7 +322,7 @@ public class JSqlDynamicSqlParser {
 
         // 1. 逻辑删除条件
         TableCacheManager.DeleteInfo deleteInfo = TableCacheManager.getDeleteInfoByTableName(tableName);
-        if (deleteInfo != null && deleteInfo.isValid()
+        if (deleteInfo != null && deleteInfo.isValid() && StringUtils.isNotBlank(deleteInfo.getDelColumn())
                 && !isDeleteConditionExists(existingWhere, deleteInfo.getDelColumn(), alias, tableName)) {
             Column col = new Column();
             col.setTable(new Table(tableRef));
@@ -457,7 +463,7 @@ public class JSqlDynamicSqlParser {
         String alias = table.getAlias() != null ? table.getAlias().getName() : null;
         
         TableCacheManager.DeleteInfo deleteInfo = TableCacheManager.getDeleteInfoByTableName(tableName);
-        if (deleteInfo != null && deleteInfo.isValid()) {
+        if (deleteInfo != null && deleteInfo.isValid() && StringUtils.isNotBlank(deleteInfo.getDelColumn())) {
             // 检查现有WHERE条件中是否已包含删除字段条件
             if (!isDeleteConditionExists(existingWhere, deleteInfo.getDelColumn(), alias, tableName)) {
                 TableDeleteCondition condition = new TableDeleteCondition(tableName, alias, deleteInfo, joinType, joinObject);
@@ -474,7 +480,7 @@ public class JSqlDynamicSqlParser {
                     whereConditions.add(condition);
                 }
                 
-                log.debug("表{}({})的删除条件将添加到{}", tableName, joinType, 
+                log.debug("表{}({})的删除条件将添加到{}", tableName, joinType,
                     (joinType == JoinType.LEFT_JOIN || joinType == JoinType.RIGHT_JOIN) ? "JOIN ON" : "WHERE");
             } else {
                 log.debug("表{}的删除条件已存在，跳过自动拼接", tableName);
@@ -556,7 +562,7 @@ public class JSqlDynamicSqlParser {
         String alias = table.getAlias() != null ? table.getAlias().getName() : null;
         
         TableCacheManager.DeleteInfo deleteInfo = TableCacheManager.getDeleteInfoByTableName(tableName);
-        if (deleteInfo != null && deleteInfo.isValid()) {
+        if (deleteInfo != null && deleteInfo.isValid() && StringUtils.isNotBlank(deleteInfo.getDelColumn())) {
             // 检查现有WHERE条件中是否已包含删除字段条件
             if (!isDeleteConditionExists(existingWhere, deleteInfo.getDelColumn(), alias, tableName)) {
                 String key = alias != null ? alias : tableName;
