@@ -53,8 +53,17 @@ public class BaseDaoImpl implements IBaseDao {
 	private final SqlRewriteCache queryRewriteCache;
 	private final SqlBuilder sqlBuilder;
 
+	@Autowired
+	protected NamedParameterJdbcTemplate namedParameterJdbcTemplate;
+
 	public BaseDaoImpl(MyJdbcProperties properties, SqlBuilder sqlBuilder) {
 		this(properties, DEFAULT_QUERY_REWRITE_CACHE_SIZE, sqlBuilder);
+	}
+
+	public BaseDaoImpl(MyJdbcProperties properties, NamedParameterJdbcTemplate namedParameterJdbcTemplate,
+	                  SqlBuilder sqlBuilder) {
+		this(properties, DEFAULT_QUERY_REWRITE_CACHE_SIZE, sqlBuilder);
+		this.namedParameterJdbcTemplate = namedParameterJdbcTemplate;
 	}
 
 	BaseDaoImpl(MyJdbcProperties properties, int queryRewriteCacheSize, SqlBuilder sqlBuilder) {
@@ -216,9 +225,6 @@ public class BaseDaoImpl implements IBaseDao {
 		return (RowMapper<T>) rowMapperCache.computeIfAbsent(clazz, c ->
 				isWrapClass(c) ? new SingleColumnRowMapper<>(c) : new MyBeanPropertyRowMapper<>(c));
 	}
-
-	@Autowired
-	protected NamedParameterJdbcTemplate namedParameterJdbcTemplate;
 
 	/** 租户ID提供者（SPI），集成方注册 Bean 后自动注入；未注册则为 null */
 	@Autowired(required = false)

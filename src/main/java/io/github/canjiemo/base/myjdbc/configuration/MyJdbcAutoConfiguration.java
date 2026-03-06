@@ -47,7 +47,7 @@ public class MyJdbcAutoConfiguration {
     @ConditionalOnMissingBean(IBaseService.class)
     public BaseServiceImpl baseService(IBaseDao baseDao, JdbcTemplate jdbcTemplate,
                                        NamedParameterJdbcTemplate namedParameterJdbcTemplate){
-        return new BaseServiceImpl();
+        return new BaseServiceImpl(baseDao, jdbcTemplate, namedParameterJdbcTemplate);
     }
 
     @Bean
@@ -58,16 +58,16 @@ public class MyJdbcAutoConfiguration {
 
     @Bean
     @ConditionalOnMissingBean(TableInfoBuilder.class)
-    public TableInfoBuilder tableInfoBuilder(){
+    public static TableInfoBuilder tableInfoBuilder(){
         return new TableInfoBuilder();
     }
 
     @Bean
-    @ConditionalOnBean({NamedParameterJdbcTemplate.class, SqlBuilder.class})
+    @ConditionalOnBean({NamedParameterJdbcTemplate.class, DataSource.class})
     @ConditionalOnMissingBean(IBaseDao.class)
     public BaseDaoImpl baseDao(MyJdbcProperties properties, NamedParameterJdbcTemplate namedParameterJdbcTemplate,
                                SqlBuilder sqlBuilder){
-        return new BaseDaoImpl(properties, sqlBuilder);
+        return new BaseDaoImpl(properties, namedParameterJdbcTemplate, sqlBuilder);
     }
 
     @Bean

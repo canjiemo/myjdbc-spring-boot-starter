@@ -1,5 +1,6 @@
 package io.github.canjiemo.base.myjdbc.rowmapper;
 
+import io.github.canjiemo.base.myjdbc.annotation.MyTable;
 import io.github.canjiemo.base.myjdbc.annotation.MyField;
 import io.github.canjiemo.base.myjdbc.builder.TableInfoBuilder;
 import io.github.canjiemo.base.myjdbc.metadata.TableInfo;
@@ -171,6 +172,11 @@ public class MyBeanPropertyRowMapper<T> implements RowMapper<T> {
         this.mappedFields = new HashMap<>();
         this.mappedProperties = new HashSet<>();
 
+        if (!mappedClass.isAnnotationPresent(MyTable.class)) {
+            initializeFromBeanProperties(mappedClass);
+            return;
+        }
+
         try {
             TableInfo tableInfo = TableInfoBuilder.getTableInfo(mappedClass);
             for (Field field : tableInfo.getFieldList()) {
@@ -195,16 +201,20 @@ public class MyBeanPropertyRowMapper<T> implements RowMapper<T> {
                 this.mappedProperties.add(field.getName());
             }
         }catch(Exception e){
-            for (PropertyDescriptor pd : BeanUtils.getPropertyDescriptors(mappedClass)) {
-                if (pd.getWriteMethod() != null) {
-                    String lowerCaseName = lowerCaseName(pd.getName());
-                    this.mappedFields.put(lowerCaseName, pd);
-                    String underscoreName = underscoreName(pd.getName());
-                    if (!lowerCaseName.equals(underscoreName)) {
-                        this.mappedFields.put(underscoreName, pd);
-                    }
-                    this.mappedProperties.add(pd.getName());
+            initializeFromBeanProperties(mappedClass);
+        }
+    }
+
+    private void initializeFromBeanProperties(Class<T> mappedClass) {
+        for (PropertyDescriptor pd : BeanUtils.getPropertyDescriptors(mappedClass)) {
+            if (pd.getWriteMethod() != null) {
+                String lowerCaseName = lowerCaseName(pd.getName());
+                this.mappedFields.put(lowerCaseName, pd);
+                String underscoreName = underscoreName(pd.getName());
+                if (!lowerCaseName.equals(underscoreName)) {
+                    this.mappedFields.put(underscoreName, pd);
                 }
+                this.mappedProperties.add(pd.getName());
             }
         }
     }

@@ -85,6 +85,56 @@ class MyJdbcAutoConfigurationTest {
     }
 
     @Test
+    @DisplayName("存在 DataSource 时应创建默认的 IBaseDao 与 IBaseService")
+    void defaultBeansShouldBeCreatedWhenDataSourcePresent() {
+        AnnotationConfigApplicationContext context = new AnnotationConfigApplicationContext();
+        Map<String, Object> values = new HashMap<>();
+        values.put("myjdbc.validate-schema", "false");
+        context.getEnvironment().getPropertySources().addFirst(new MapPropertySource("test", values));
+
+        context.registerBean(DataSource.class, MyJdbcAutoConfigurationTest::stubDataSource);
+        context.register(MyJdbcTemplateAutoConfiguration.class, MyJdbcAutoConfiguration.class);
+
+        context.refresh();
+        try {
+            assertInstanceOf(BaseDaoImpl.class, context.getBean(IBaseDao.class));
+            assertInstanceOf(BaseServiceImpl.class, context.getBean(IBaseService.class));
+            assertInstanceOf(SqlBuilder.class, context.getBean(SqlBuilder.class));
+            assertInstanceOf(JdbcTemplate.class, context.getBean(JdbcTemplate.class));
+            assertInstanceOf(NamedParameterJdbcTemplate.class, context.getBean(NamedParameterJdbcTemplate.class));
+        } finally {
+            context.close();
+            resetTableInfoBuilderState();
+        }
+    }
+
+    @Test
+    @DisplayName("继承 BaseServiceImpl 的业务服务应能注入默认 IBaseDao")
+    void inheritedBusinessServiceShouldReceiveBaseDaoBean() throws Exception {
+        AnnotationConfigApplicationContext context = new AnnotationConfigApplicationContext();
+        Map<String, Object> values = new HashMap<>();
+        values.put("myjdbc.validate-schema", "false");
+        context.getEnvironment().getPropertySources().addFirst(new MapPropertySource("test", values));
+
+        context.registerBean(DataSource.class, MyJdbcAutoConfigurationTest::stubDataSource);
+        context.register(MyJdbcTemplateAutoConfiguration.class, MyJdbcAutoConfiguration.class);
+        context.registerBean(DemoInheritedService.class, DemoInheritedService::new);
+
+        context.refresh();
+        try {
+            DemoInheritedService service = context.getBean(DemoInheritedService.class);
+            assertNotNull(readField(BaseServiceImpl.class, service, "baseDao"));
+            assertSame(context.getBean(IBaseDao.class), readField(BaseServiceImpl.class, service, "baseDao"));
+            assertSame(context.getBean(JdbcTemplate.class), readField(BaseServiceImpl.class, service, "jdbcTemplate"));
+            assertSame(context.getBean(NamedParameterJdbcTemplate.class),
+                    readField(BaseServiceImpl.class, service, "namedParameterJdbcTemplate"));
+        } finally {
+            context.close();
+            resetTableInfoBuilderState();
+        }
+    }
+
+    @Test
     @DisplayName("默认 Bean 工厂方法应声明为可覆盖")
     void defaultBeanFactoryMethodsShouldBeConditionalOnMissingBean() throws Exception {
         assertConditionalOnMissingBean("baseService", IBaseDao.class, JdbcTemplate.class, NamedParameterJdbcTemplate.class);
@@ -131,6 +181,12 @@ class MyJdbcAutoConfigurationTest {
         return null;
     }
 
+    private static Object readField(Class<?> owner, Object target, String fieldName) throws Exception {
+        Field field = owner.getDeclaredField(fieldName);
+        field.setAccessible(true);
+        return field.get(target);
+    }
+
     private static DataSource stubDataSource() {
         DatabaseMetaData metaData = (DatabaseMetaData) Proxy.newProxyInstance(
                 DatabaseMetaData.class.getClassLoader(),
@@ -173,5 +229,8 @@ class MyJdbcAutoConfigurationTest {
             throw new AssertionError("清理 TableInfoBuilder 静态状态失败", e);
         }
         TableCacheManager.clearCache();
+    }
+
+    static class DemoInheritedService extends BaseServiceImpl {
     }
 }

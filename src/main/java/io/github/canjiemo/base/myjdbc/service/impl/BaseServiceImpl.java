@@ -29,6 +29,16 @@ public class BaseServiceImpl implements IBaseService {
 	@Autowired
 	protected NamedParameterJdbcTemplate namedParameterJdbcTemplate;
 
+	public BaseServiceImpl() {
+	}
+
+	public BaseServiceImpl(IBaseDao baseDao, JdbcTemplate jdbcTemplate,
+	                      NamedParameterJdbcTemplate namedParameterJdbcTemplate) {
+		this.baseDao = baseDao;
+		this.jdbcTemplate = jdbcTemplate;
+		this.namedParameterJdbcTemplate = namedParameterJdbcTemplate;
+	}
+
 	@Override
 	public <T> Pager<T> queryPageForSql(String sql, Object param, Pager<T> pager, Class<T> clazz) {
 		return baseDao.queryPageForSql(sql, param, pager,clazz);

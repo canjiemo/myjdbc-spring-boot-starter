@@ -19,8 +19,8 @@ import static org.junit.jupiter.api.Assertions.*;
 class TableInfoBuilderTest {
 
     @Test
-    @DisplayName("AutoConfigurationPackages 应优先参与扫描路径推导")
-    void getScanPackagesShouldPreferAutoConfigurationPackages() throws Exception {
+    @DisplayName("AutoConfigurationPackages 与 SpringBootApplication 扫描配置应合并")
+    void getScanPackagesShouldMergeAutoConfigurationPackagesAndApplicationScanPackages() throws Exception {
         DefaultListableBeanFactory beanFactory = new DefaultListableBeanFactory();
         AutoConfigurationPackages.register(beanFactory,
                 "com.example.demo",
@@ -28,11 +28,46 @@ class TableInfoBuilderTest {
 
         TableInfoBuilder builder = new TableInfoBuilder();
         setBeanFactory(builder, beanFactory);
+        String key = "sun.java.command";
+        String original = System.getProperty(key);
+        System.setProperty(key, ScanBasePackageClassesApplication.class.getName());
 
-        List<String> packages = invokeGetScanPackages(builder);
+        try {
+            List<String> packages = invokeGetScanPackages(builder);
+            assertTrue(packages.contains("com.example.demo"));
+            assertTrue(packages.contains("io.github.canjiemo.base.myjdbc.scanmarker"));
+        } finally {
+            if (original == null) {
+                System.clearProperty(key);
+            } else {
+                System.setProperty(key, original);
+            }
+        }
+    }
 
-        assertTrue(packages.contains("com.example.demo"));
-        assertTrue(packages.contains("io.github.canjiemo.base.myjdbc.scanmarker"));
+    @Test
+    @DisplayName("scanBasePackages 应补充应用显式声明的父包路径")
+    void getScanPackagesShouldIncludeExplicitScanBasePackages() throws Exception {
+        DefaultListableBeanFactory beanFactory = new DefaultListableBeanFactory();
+        AutoConfigurationPackages.register(beanFactory, "com.seer.fitness.edu");
+
+        TableInfoBuilder builder = new TableInfoBuilder();
+        setBeanFactory(builder, beanFactory);
+        String key = "sun.java.command";
+        String original = System.getProperty(key);
+        System.setProperty(key, ScanBasePackagesApplication.class.getName());
+
+        try {
+            List<String> packages = invokeGetScanPackages(builder);
+            assertTrue(packages.contains("com.seer.fitness.edu"));
+            assertTrue(packages.contains("com.seer.fitness"));
+        } finally {
+            if (original == null) {
+                System.clearProperty(key);
+            } else {
+                System.setProperty(key, original);
+            }
+        }
     }
 
     @Test
@@ -105,6 +140,10 @@ class TableInfoBuilderTest {
 
     @SpringBootApplication(scanBasePackageClasses = ScanMarker.class)
     static class ScanBasePackageClassesApplication {
+    }
+
+    @SpringBootApplication(scanBasePackages = "com.seer.fitness")
+    static class ScanBasePackagesApplication {
     }
 
     @SpringBootApplication(scanBasePackageClasses = InheritedPkUser.class)

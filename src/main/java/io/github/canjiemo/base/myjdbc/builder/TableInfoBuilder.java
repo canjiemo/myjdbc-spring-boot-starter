@@ -109,7 +109,6 @@ public class TableInfoBuilder implements BeanPostProcessor, Ordered {
         addAutoConfigurationPackages(packages);
         if (!packages.isEmpty()) {
             log.info("从AutoConfigurationPackages获取包路径: {}", packages);
-            return new ArrayList<>(packages);
         }
 
         try {
@@ -139,6 +138,9 @@ public class TableInfoBuilder implements BeanPostProcessor, Ordered {
             log.warn("无法从@SpringBootApplication获取包路径: {}", e.getMessage());
         }
 
+        if (!packages.isEmpty()) {
+            return new ArrayList<>(packages);
+        }
         log.warn("未找到 Spring Boot 自动配置包或主应用类，保持扫描包为空，避免兜底全局扫描");
         return List.of();
     }
