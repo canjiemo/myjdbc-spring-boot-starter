@@ -10,12 +10,14 @@ import io.github.mocanjie.base.myjpa.service.impl.BaseServiceImpl;
 import io.github.mocanjie.base.myjpa.validation.DatabaseSchemaValidator;
 import io.github.mocanjie.base.myjpa.validation.SchemaValidationRunner;
 import jakarta.annotation.PostConstruct;
+import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.beans.factory.config.BeanPostProcessor;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnClass;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
-import org.springframework.boot.context.properties.ConfigurationProperties;
+import org.springframework.boot.logging.LogLevel;
+import org.springframework.boot.logging.LoggingSystem;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Primary;
@@ -26,11 +28,17 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import javax.sql.DataSource;
 
 @Configuration
-@ConfigurationProperties(prefix ="myjpa.showsql")
 public class MyJpaAutoConfiguration implements BeanPostProcessor, Ordered {
+    private static final Logger log = LoggerFactory.getLogger(MyJpaAutoConfiguration.class);
 
-    @Value("${myjpa.showsql:true}")
+    @Value("${myjpa.show-sql.enabled:${myjpa.show-sql:${myjpa.showsql.enabled:${myjpa.showsql:false}}}}")
     public boolean showSql;
+
+    @Value("${myjpa.show-sql.sql-level:${myjpa.showsql.sql-level:DEBUG}}")
+    public String showSqlLevel;
+
+    @Value("${myjpa.show-sql.param-level:${myjpa.showsql.param-level:TRACE}}")
+    public String showSqlParamLevel;
 
     @Value("${myjpa.show-sql-time:false}")
     public boolean showSqlTime;
@@ -93,38 +101,21 @@ public class MyJpaAutoConfiguration implements BeanPostProcessor, Ordered {
         JSqlDynamicSqlParser.tenantColumn = tenantColumn;
         // 同步 SQL 执行时间打印开关
         BaseDaoImpl.showSqlTime = showSqlTime;
-
-        try {
-            // 使用反射来兼容不同的日志实现
-            Object loggerContext = LoggerFactory.getILoggerFactory();
-
-            // 设置 org.reflections 为 ERROR 级别
-            setLogLevel(loggerContext, "org.reflections", "ERROR");
-
-            if (showSql) {
-                // 启用 SQL 日志
-                setLogLevel(loggerContext, "org.springframework.jdbc.core.JdbcTemplate", "DEBUG");
-                setLogLevel(loggerContext, "org.springframework.jdbc.core.StatementCreatorUtils", "TRACE");
-            }
-        } catch (Exception e) {
-            // 如果日志级别设置失败，忽略
-            System.out.println("警告: 无法设置日志级别: " + e.getMessage());
+        // 通过 myjpa 配置控制 SQL 日志级别（由应用方决定是否开启）
+        if (showSql) {
+            applySqlLogLevels();
         }
     }
 
-    private void setLogLevel(Object loggerContext, String loggerName, String level) {
+    private void applySqlLogLevels() {
         try {
-            // 尝试 Logback 方式
-            Class<?> loggerContextClass = loggerContext.getClass();
-            if (loggerContextClass.getName().contains("logback")) {
-                Object logger = loggerContextClass.getMethod("getLogger", String.class)
-                    .invoke(loggerContext, loggerName);
-                Class<?> levelClass = Class.forName("ch.qos.logback.classic.Level");
-                Object levelObj = levelClass.getField(level).get(null);
-                logger.getClass().getMethod("setLevel", levelClass).invoke(logger, levelObj);
-            }
+            LoggingSystem loggingSystem = LoggingSystem.get(getClass().getClassLoader());
+            LogLevel sqlLevel = LogLevel.valueOf(showSqlLevel.trim().toUpperCase());
+            LogLevel paramLevel = LogLevel.valueOf(showSqlParamLevel.trim().toUpperCase());
+            loggingSystem.setLogLevel("org.springframework.jdbc.core.JdbcTemplate", sqlLevel);
+            loggingSystem.setLogLevel("org.springframework.jdbc.core.StatementCreatorUtils", paramLevel);
         } catch (Exception e) {
-            // 静默忽略日志级别设置失败
+            log.warn("应用 myjpa.show-sql 日志级别失败: {}", e.getMessage());
         }
     }
 

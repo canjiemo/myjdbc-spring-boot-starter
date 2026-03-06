@@ -2,17 +2,12 @@ package io.github.mocanjie.base.myjpa.parser;
 
 import io.github.mocanjie.base.myjpa.cache.TableCacheManager;
 import io.github.mocanjie.base.myjpa.tenant.TenantContext;
-import net.sf.jsqlparser.JSQLParserException;
 import net.sf.jsqlparser.expression.*;
 import net.sf.jsqlparser.expression.operators.conditional.AndExpression;
 import net.sf.jsqlparser.expression.operators.conditional.OrExpression;
 import net.sf.jsqlparser.expression.operators.relational.EqualsTo;
-import net.sf.jsqlparser.expression.operators.relational.ExistsExpression;
-import net.sf.jsqlparser.expression.operators.relational.InExpression;
-import net.sf.jsqlparser.parser.CCJSqlParserUtil;
 import net.sf.jsqlparser.schema.Column;
 import net.sf.jsqlparser.schema.Table;
-import net.sf.jsqlparser.statement.Statement;
 import net.sf.jsqlparser.statement.select.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -78,27 +73,7 @@ public class JSqlDynamicSqlParser {
         if (sql == null || sql.trim().isEmpty()) {
             return sql;
         }
-
-        try {
-            Statement statement = CCJSqlParserUtil.parse(sql);
-
-            if (!(statement instanceof Select)) {
-                // 非SELECT语句直接返回
-                return sql;
-            }
-
-            Select selectStatement = (Select) statement;
-            processSelectStatement(selectStatement);
-
-            return selectStatement.toString();
-
-        } catch (JSQLParserException e) {
-            log.warn("解析SQL时发生异常，返回原始SQL: {}, 异常: {}", sql, e.getMessage());
-            return sql;
-        } catch (Exception e) {
-            log.error("处理SQL时发生未知异常，返回原始SQL: {}", sql, e);
-            return sql;
-        }
+        return SqlParserSupport.rewriteSelectSql(sql, "逻辑删除条件", JSqlDynamicSqlParser::processSelectStatement, log);
     }
     
     // ===================== 多租户条件注入 =====================
@@ -125,34 +100,14 @@ public class JSqlDynamicSqlParser {
             return sql;
         }
 
-        try {
-            Statement statement = CCJSqlParserUtil.parse(sql);
-            if (!(statement instanceof Select)) {
-                return sql;
-            }
-            Select selectStatement = (Select) statement;
-            processTenantSelect(selectStatement);
-            return selectStatement.toString();
-        } catch (JSQLParserException e) {
-            log.warn("解析SQL时发生异常（租户条件），返回原始SQL: {}, 异常: {}", sql, e.getMessage());
-            return sql;
-        } catch (Exception e) {
-            log.error("处理SQL时发生未知异常（租户条件），返回原始SQL: {}", sql, e);
-            return sql;
-        }
+        return SqlParserSupport.rewriteSelectSql(sql, "租户条件", JSqlDynamicSqlParser::processTenantSelect, log);
     }
 
     /**
      * 处理 SELECT 语句，注入租户条件（复用 processSelect 框架，但走租户分支）
      */
     private static void processTenantSelect(Select select) {
-        if (select instanceof PlainSelect) {
-            processTenantPlainSelect((PlainSelect) select);
-        } else if (select instanceof SetOperationList) {
-            for (Select s : ((SetOperationList) select).getSelects()) {
-                processTenantSelect(s);
-            }
-        }
+        SqlParserSupport.processSelectTree(select, JSqlDynamicSqlParser::processTenantPlainSelect);
     }
 
     /**
@@ -164,25 +119,10 @@ public class JSqlDynamicSqlParser {
 
         Expression existingWhere = plainSelect.getWhere();
 
-        // 主表
-        if (plainSelect.getFromItem() instanceof Table) {
-            Table table = (Table) plainSelect.getFromItem();
-            addTableTenantConditionByType(table, existingWhere, JoinType.FROM_TABLE, null, whereConditions, joinConditions);
-        } else if (plainSelect.getFromItem() instanceof ParenthesedSelect) {
-            processTenantSelect(((ParenthesedSelect) plainSelect.getFromItem()).getSelect());
-        }
-
-        // JOIN 表
-        if (plainSelect.getJoins() != null) {
-            for (Join join : plainSelect.getJoins()) {
-                if (join.getRightItem() instanceof Table) {
-                    addTableTenantConditionByType((Table) join.getRightItem(), existingWhere,
-                            getJoinType(join), join, whereConditions, joinConditions);
-                } else if (join.getRightItem() instanceof ParenthesedSelect) {
-                    processTenantSelect(((ParenthesedSelect) join.getRightItem()).getSelect());
-                }
-            }
-        }
+        SqlParserSupport.visitTables(plainSelect, JSqlDynamicSqlParser::processTenantSelect,
+                (table, join) -> addTableTenantConditionByType(table, existingWhere,
+                        join == null ? JoinType.FROM_TABLE : getJoinType(join), join,
+                        whereConditions, joinConditions));
 
         // 注入 WHERE 条件
         if (!whereConditions.isEmpty()) {
@@ -199,7 +139,7 @@ public class JSqlDynamicSqlParser {
         }
 
         // 递归处理子查询
-        processTenantSubQueries(plainSelect);
+        SqlParserSupport.processNestedSelects(plainSelect, JSqlDynamicSqlParser::processTenantSelect);
     }
 
     private static void addTableTenantConditionByType(Table table, Expression existingWhere, JoinType joinType,
@@ -253,10 +193,7 @@ public class JSqlDynamicSqlParser {
                     return; // 已存在，跳过
                 }
             }
-            Expression combined = null;
-            for (Expression expr : onExpressions) {
-                combined = (combined == null) ? expr : new AndExpression(combined, expr);
-            }
+            Expression combined = SqlParserSupport.combineWithAnd(onExpressions);
             List<Expression> newExpressions = new ArrayList<>();
             newExpressions.add(new AndExpression(combined, tenantCond));
             condition.joinObject.setOnExpressions(newExpressions);
@@ -295,39 +232,6 @@ public class JSqlDynamicSqlParser {
     }
 
     /**
-     * 递归处理子查询中的租户条件
-     */
-    private static void processTenantSubQueries(PlainSelect plainSelect) {
-        if (plainSelect.getSelectItems() != null) {
-            for (SelectItem item : plainSelect.getSelectItems()) {
-                if (item.getExpression() instanceof ParenthesedSelect) {
-                    processTenantSelect(((ParenthesedSelect) item.getExpression()).getSelect());
-                }
-            }
-        }
-        if (plainSelect.getWhere() != null) {
-            processTenantExpressionSubQueries(plainSelect.getWhere());
-        }
-    }
-
-    private static void processTenantExpressionSubQueries(Expression expression) {
-        if (expression instanceof ParenthesedSelect ps) {
-            processTenantSelect(ps.getSelect());
-        } else if (expression instanceof NotExpression notExpr) {
-            processTenantExpressionSubQueries(notExpr.getExpression());
-        } else if (expression instanceof InExpression inExpr) {
-            if (inExpr.getRightExpression() != null) {
-                processTenantExpressionSubQueries(inExpr.getRightExpression());
-            }
-        } else if (expression instanceof ExistsExpression existsExpr) {
-            processTenantExpressionSubQueries(existsExpr.getRightExpression());
-        } else if (expression instanceof BinaryExpression binExpr) {
-            processTenantExpressionSubQueries(binExpr.getLeftExpression());
-            processTenantExpressionSubQueries(binExpr.getRightExpression());
-        }
-    }
-
-    /**
      * 租户条件信息
      */
     private static class TableTenantCondition {
@@ -359,31 +263,11 @@ public class JSqlDynamicSqlParser {
         if (sql == null || sql.trim().isEmpty()) {
             return sql;
         }
-        try {
-            Statement statement = CCJSqlParserUtil.parse(sql);
-            if (!(statement instanceof Select)) {
-                return sql;
-            }
-            Select selectStatement = (Select) statement;
-            processUnifiedSelect(selectStatement);
-            return selectStatement.toString();
-        } catch (JSQLParserException e) {
-            log.warn("解析SQL时发生异常（合并条件），返回原始SQL: {}, 异常: {}", sql, e.getMessage());
-            return sql;
-        } catch (Exception e) {
-            log.error("处理SQL时发生未知异常（合并条件），返回原始SQL: {}", sql, e);
-            return sql;
-        }
+        return SqlParserSupport.rewriteSelectSql(sql, "合并条件", JSqlDynamicSqlParser::processUnifiedSelect, log);
     }
 
     private static void processUnifiedSelect(Select select) {
-        if (select instanceof PlainSelect) {
-            processUnifiedPlainSelect((PlainSelect) select);
-        } else if (select instanceof SetOperationList) {
-            for (Select s : ((SetOperationList) select).getSelects()) {
-                processUnifiedSelect(s);
-            }
-        }
+        SqlParserSupport.processSelectTree(select, JSqlDynamicSqlParser::processUnifiedPlainSelect);
     }
 
     private static void processUnifiedPlainSelect(PlainSelect plainSelect) {
@@ -392,25 +276,10 @@ public class JSqlDynamicSqlParser {
 
         Expression existingWhere = plainSelect.getWhere();
 
-        // 主表
-        if (plainSelect.getFromItem() instanceof Table) {
-            collectUnifiedConditions((Table) plainSelect.getFromItem(), existingWhere,
-                    JoinType.FROM_TABLE, null, whereConditions, joinConditions);
-        } else if (plainSelect.getFromItem() instanceof ParenthesedSelect) {
-            processUnifiedSelect(((ParenthesedSelect) plainSelect.getFromItem()).getSelect());
-        }
-
-        // JOIN 表
-        if (plainSelect.getJoins() != null) {
-            for (Join join : plainSelect.getJoins()) {
-                if (join.getRightItem() instanceof Table) {
-                    collectUnifiedConditions((Table) join.getRightItem(), existingWhere,
-                            getJoinType(join), join, whereConditions, joinConditions);
-                } else if (join.getRightItem() instanceof ParenthesedSelect) {
-                    processUnifiedSelect(((ParenthesedSelect) join.getRightItem()).getSelect());
-                }
-            }
-        }
+        SqlParserSupport.visitTables(plainSelect, JSqlDynamicSqlParser::processUnifiedSelect,
+                (table, join) -> collectUnifiedConditions(table, existingWhere,
+                        join == null ? JoinType.FROM_TABLE : getJoinType(join), join,
+                        whereConditions, joinConditions));
 
         // 注入 WHERE 条件
         if (!whereConditions.isEmpty()) {
@@ -427,7 +296,7 @@ public class JSqlDynamicSqlParser {
         }
 
         // 递归处理子查询
-        processUnifiedSubQueries(plainSelect);
+        SqlParserSupport.processNestedSelects(plainSelect, JSqlDynamicSqlParser::processUnifiedSelect);
     }
 
     /**
@@ -487,17 +356,11 @@ public class JSqlDynamicSqlParser {
     private static void applyUnifiedConditionsToJoinOn(UnifiedTableConditions utc) {
         if (utc.joinObject == null) return;
 
-        Expression newConditions = null;
-        for (Expression expr : utc.expressions) {
-            newConditions = (newConditions == null) ? expr : new AndExpression(newConditions, expr);
-        }
+        Expression newConditions = SqlParserSupport.combineWithAnd(utc.expressions);
 
         Collection<Expression> onExpressions = utc.joinObject.getOnExpressions();
         if (onExpressions != null && !onExpressions.isEmpty()) {
-            Expression combined = null;
-            for (Expression expr : onExpressions) {
-                combined = (combined == null) ? expr : new AndExpression(combined, expr);
-            }
+            Expression combined = SqlParserSupport.combineWithAnd(onExpressions);
             List<Expression> newExprs = new ArrayList<>();
             newExprs.add(new AndExpression(combined, newConditions));
             utc.joinObject.setOnExpressions(newExprs);
@@ -505,36 +368,6 @@ public class JSqlDynamicSqlParser {
             List<Expression> newExprs = new ArrayList<>();
             newExprs.add(newConditions);
             utc.joinObject.setOnExpressions(newExprs);
-        }
-    }
-
-    private static void processUnifiedSubQueries(PlainSelect plainSelect) {
-        if (plainSelect.getSelectItems() != null) {
-            for (SelectItem item : plainSelect.getSelectItems()) {
-                if (item.getExpression() instanceof ParenthesedSelect) {
-                    processUnifiedSelect(((ParenthesedSelect) item.getExpression()).getSelect());
-                }
-            }
-        }
-        if (plainSelect.getWhere() != null) {
-            processUnifiedExpressionSubQueries(plainSelect.getWhere());
-        }
-    }
-
-    private static void processUnifiedExpressionSubQueries(Expression expression) {
-        if (expression instanceof ParenthesedSelect ps) {
-            processUnifiedSelect(ps.getSelect());
-        } else if (expression instanceof NotExpression notExpr) {
-            processUnifiedExpressionSubQueries(notExpr.getExpression());
-        } else if (expression instanceof InExpression inExpr) {
-            if (inExpr.getRightExpression() != null) {
-                processUnifiedExpressionSubQueries(inExpr.getRightExpression());
-            }
-        } else if (expression instanceof ExistsExpression existsExpr) {
-            processUnifiedExpressionSubQueries(existsExpr.getRightExpression());
-        } else if (expression instanceof BinaryExpression binExpr) {
-            processUnifiedExpressionSubQueries(binExpr.getLeftExpression());
-            processUnifiedExpressionSubQueries(binExpr.getRightExpression());
         }
     }
 
@@ -571,11 +404,7 @@ public class JSqlDynamicSqlParser {
      * 处理Select，支持各种类型的SELECT结构
      */
     private static void processSelect(Select select) {
-        if (select instanceof PlainSelect) {
-            processPlainSelect((PlainSelect) select);
-        } else if (select instanceof SetOperationList) {
-            processSetOperationList((SetOperationList) select);
-        }
+        SqlParserSupport.processSelectTree(select, JSqlDynamicSqlParser::processPlainSelect);
     }
     
     /**
@@ -588,31 +417,11 @@ public class JSqlDynamicSqlParser {
         
         // 获取现有的WHERE条件，用于检查是否已包含删除条件
         Expression existingWhere = plainSelect.getWhere();
-        
-        // 处理FROM子句中的表（主表）
-        if (plainSelect.getFromItem() instanceof Table) {
-            Table table = (Table) plainSelect.getFromItem();
-            addTableConditionByType(table, existingWhere, JoinType.FROM_TABLE, null, whereConditions, joinConditions);
-        } else if (plainSelect.getFromItem() instanceof ParenthesedSelect) {
-            // 递归处理子查询
-            ParenthesedSelect parenthesedSelect = (ParenthesedSelect) plainSelect.getFromItem();
-            processSelect(parenthesedSelect.getSelect());
-        }
-        
-        // 处理JOIN子句中的表
-        if (plainSelect.getJoins() != null) {
-            for (Join join : plainSelect.getJoins()) {
-                if (join.getRightItem() instanceof Table) {
-                    Table table = (Table) join.getRightItem();
-                    JoinType joinType = getJoinType(join);
-                    addTableConditionByType(table, existingWhere, joinType, join, whereConditions, joinConditions);
-                } else if (join.getRightItem() instanceof ParenthesedSelect) {
-                    // 递归处理JOIN中的子查询
-                    ParenthesedSelect parenthesedSelect = (ParenthesedSelect) join.getRightItem();
-                    processSelect(parenthesedSelect.getSelect());
-                }
-            }
-        }
+
+        SqlParserSupport.visitTables(plainSelect, JSqlDynamicSqlParser::processSelect,
+                (table, join) -> addTableConditionByType(table, existingWhere,
+                        join == null ? JoinType.FROM_TABLE : getJoinType(join), join,
+                        whereConditions, joinConditions));
         
         // 处理WHERE条件（主表和INNER JOIN）
         if (!whereConditions.isEmpty()) {
@@ -633,65 +442,7 @@ public class JSqlDynamicSqlParser {
         }
         
         // 处理子查询中的SELECT
-        processSubQueries(plainSelect);
-    }
-    
-    /**
-     * 处理UNION等复合查询
-     */
-    private static void processSetOperationList(SetOperationList setOperationList) {
-        for (Select select : setOperationList.getSelects()) {
-            processSelect(select);
-        }
-    }
-    
-    /**
-     * 处理子查询
-     */
-    private static void processSubQueries(PlainSelect plainSelect) {
-        // 处理SELECT列表中的子查询
-        if (plainSelect.getSelectItems() != null) {
-            for (SelectItem selectItem : plainSelect.getSelectItems()) {
-                processSelectItemSubQueries(selectItem);
-            }
-        }
-        
-        // 处理WHERE条件中的子查询
-        if (plainSelect.getWhere() != null) {
-            processExpressionSubQueries(plainSelect.getWhere());
-        }
-    }
-    
-    /**
-     * 处理SELECT项中的子查询
-     */
-    private static void processSelectItemSubQueries(SelectItem selectItem) {
-        if (selectItem.getExpression() != null) {
-            processExpressionSubQueries(selectItem.getExpression());
-        }
-    }
-    
-    /**
-     * 递归处理表达式中的子查询
-     */
-    private static void processExpressionSubQueries(Expression expression) {
-        if (expression instanceof ParenthesedSelect ps) {
-            processSelect(ps.getSelect());
-        } else if (expression instanceof NotExpression notExpr) {
-            // NOT EXISTS / NOT IN：剥开 NOT 层继续递归
-            processExpressionSubQueries(notExpr.getExpression());
-        } else if (expression instanceof InExpression inExpr) {
-            // WHERE id IN (SELECT ...) / WHERE id NOT IN (SELECT ...)
-            if (inExpr.getRightExpression() != null) {
-                processExpressionSubQueries(inExpr.getRightExpression());
-            }
-        } else if (expression instanceof ExistsExpression existsExpr) {
-            // WHERE EXISTS (SELECT ...)
-            processExpressionSubQueries(existsExpr.getRightExpression());
-        } else if (expression instanceof BinaryExpression binExpr) {
-            processExpressionSubQueries(binExpr.getLeftExpression());
-            processExpressionSubQueries(binExpr.getRightExpression());
-        }
+        SqlParserSupport.processNestedSelects(plainSelect, JSqlDynamicSqlParser::processSelect);
     }
     
     
@@ -773,14 +524,7 @@ public class JSqlDynamicSqlParser {
             }
 
             // 组合所有现有条件
-            Expression combined = null;
-            for (Expression expr : onExpressions) {
-                if (combined == null) {
-                    combined = expr;
-                } else {
-                    combined = new AndExpression(combined, expr);
-                }
-            }
+            Expression combined = SqlParserSupport.combineWithAnd(onExpressions);
 
             // 添加删除条件
             combined = new AndExpression(combined, deleteCondition);
@@ -1001,4 +745,5 @@ public class JSqlDynamicSqlParser {
             this.joinObject = joinObject;
         }
     }
+
 }

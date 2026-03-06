@@ -34,14 +34,18 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 
 @Component
 public class BaseDaoImpl implements IBaseDao {
 
 	protected static Logger log = LoggerFactory.getLogger(BaseDaoImpl.class);
+	private static final String DEFAULT_BIZ_ERROR_MSG = "系统错误,请联系管理员";
 
 	/** 是否打印 SQL 执行时间，由 MyJpaAutoConfiguration 根据 myjpa.show-sql-time 配置同步 */
 	public static volatile boolean showSqlTime = false;
+	private static final SingleColumnRowMapper<Long> COUNT_ROW_MAPPER = new SingleColumnRowMapper<>(Long.class);
+	private final Map<Class<?>, RowMapper<?>> rowMapperCache = new ConcurrentHashMap<>();
 
 	private <T> T executeWithTiming(String sql, java.util.function.Supplier<T> operation) {
 		if (!showSqlTime) return operation.get();
@@ -55,9 +59,10 @@ public class BaseDaoImpl implements IBaseDao {
 		return BeanUtils.isSimpleValueType(clz) || clz == java.sql.Date.class;
 	}
 
+	@SuppressWarnings("unchecked")
 	private <T> RowMapper<T> getRowMapper(Class<T> clazz) {
-		if (isWrapClass(clazz)) return new SingleColumnRowMapper<>(clazz);
-		return new MyBeanPropertyRowMapper<>(clazz);
+		return (RowMapper<T>) rowMapperCache.computeIfAbsent(clazz, c ->
+				isWrapClass(c) ? new SingleColumnRowMapper<>(c) : new MyBeanPropertyRowMapper<>(c));
 	}
 
 	@Autowired
@@ -113,6 +118,19 @@ public class BaseDaoImpl implements IBaseDao {
 			// 单次解析：只注入删除条件
 			return new ConditionResult(JSqlDynamicSqlParser.appendDeleteCondition(sql), sps);
 		}
+	}
+
+	private <T> T querySingleInternal(String sql, SqlParameterSource sps, Class<T> clazz) {
+		var r = applyConditions(sql, sps);
+		RowMapper<T> rowMapper = getRowMapper(clazz);
+		return executeWithTiming(r.sql(), () ->
+				namedParameterJdbcTemplate.query(r.sql(), r.sps(), rs -> rs.next() ? rowMapper.mapRow(rs, 0) : null));
+	}
+
+	private BusinessException businessError(String op, Exception e, String message, Object... details) {
+		String detailText = (details == null || details.length == 0) ? "" : ", details=" + java.util.Arrays.toString(details);
+		log.error("DAO操作失败: {}{}", op, detailText, e);
+		return new BusinessException(message);
 	}
 
 	// ===================== 写操作租户 helper =====================
@@ -183,14 +201,18 @@ public class BaseDaoImpl implements IBaseDao {
 
 	@Override
 	public <T> T querySingleForSql(String sql, Object param, Class<T> clazz) {
-		List<T> list = this.queryListForSql(sql, param, clazz);
-		return (list == null || list.isEmpty()) ? null : list.get(0);
+		SqlParameterSource sps = param == null
+				? new EmptySqlParameterSource()
+				: new BeanPropertySqlParameterSource(param);
+		return querySingleInternal(sql, sps, clazz);
 	}
 
 	@Override
 	public <T> T querySingleForSql(String sql, Map<String, Object> param, Class<T> clazz) {
-		List<T> list = this.queryListForSql(sql, param, clazz);
-		return (list == null || list.isEmpty()) ? null : list.get(0);
+		SqlParameterSource sps = (param == null || param.isEmpty())
+				? new EmptySqlParameterSource()
+				: new MapSqlParameterSource(param);
+		return querySingleInternal(sql, sps, clazz);
 	}
 
 	@Override
@@ -201,7 +223,7 @@ public class BaseDaoImpl implements IBaseDao {
 		var r = applyConditions(sql, sps);
 		if (!pager.getIgnoreCount()) {
 			String countSql = "select count(*) from ( " + r.sql() + " ) mkt_page_count";
-			pager.setTotalRows(executeWithTiming(countSql, () -> namedParameterJdbcTemplate.queryForObject(countSql, r.sps(), new SingleColumnRowMapper<>(Long.class))));
+			pager.setTotalRows(executeWithTiming(countSql, () -> namedParameterJdbcTemplate.queryForObject(countSql, r.sps(), COUNT_ROW_MAPPER)));
 			if (pager.getTotalRows() > 0) {
 				String pageSql = SqlBuilder.buildPagerSql(r.sql(), pager);
 				pager.setPageData(executeWithTiming(pageSql, () -> namedParameterJdbcTemplate.query(pageSql, r.sps(), getRowMapper(clazz))));
@@ -223,7 +245,7 @@ public class BaseDaoImpl implements IBaseDao {
 		var r = applyConditions(sql, sps);
 		if (!pager.getIgnoreCount()) {
 			String countSql = "select count(*) from ( " + r.sql() + " ) mkt_page_count";
-			pager.setTotalRows(executeWithTiming(countSql, () -> namedParameterJdbcTemplate.queryForObject(countSql, r.sps(), new SingleColumnRowMapper<>(Long.class))));
+			pager.setTotalRows(executeWithTiming(countSql, () -> namedParameterJdbcTemplate.queryForObject(countSql, r.sps(), COUNT_ROW_MAPPER)));
 			if (pager.getTotalRows() > 0) {
 				String pageSql = SqlBuilder.buildPagerSql(r.sql(), pager);
 				pager.setPageData(executeWithTiming(pageSql, () -> namedParameterJdbcTemplate.query(pageSql, r.sps(), getRowMapper(clazz))));
@@ -280,11 +302,10 @@ public class BaseDaoImpl implements IBaseDao {
 				return id;
 			}
 		} catch (Exception e) {
-			log.error("插入异常", e);
 			if (e instanceof DuplicateKeyException) {
 				throw (DuplicateKeyException) e;
 			} else {
-				throw new BusinessException("系统错误,请联系管理员");
+				throw businessError("insertPO", e, DEFAULT_BIZ_ERROR_MSG, po != null ? po.getClass().getName() : "null");
 			}
 		}
 	}
@@ -321,7 +342,7 @@ public class BaseDaoImpl implements IBaseDao {
 			var r = applyWriteConditions(sql, sps, tableInfo.getTableName());
 			return executeWithTiming(r.sql(), () -> namedParameterJdbcTemplate.update(r.sql(), r.sps()));
 		} catch (Exception e) {
-			throw new BusinessException("delPO error!");
+			throw businessError("delPO", e, DEFAULT_BIZ_ERROR_MSG, po != null ? po.getClass().getName() : "null");
 		}
 	}
 
@@ -355,7 +376,8 @@ public class BaseDaoImpl implements IBaseDao {
 			final SqlParameterSource[] fParams = params;
 			return executeWithTiming(fSql, () -> namedParameterJdbcTemplate.batchUpdate(fSql, fParams)).length;
 		} catch (Exception e) {
-			throw new BusinessException("del error!");
+			throw businessError("delByIds", e, DEFAULT_BIZ_ERROR_MSG, clazz != null ? clazz.getName() : "null",
+					id == null ? 0 : id.length);
 		}
 	}
 
@@ -402,27 +424,34 @@ public class BaseDaoImpl implements IBaseDao {
 
 			final String fSql = sql;
 			final SqlParameterSource[] fParams = params;
-			executeWithTiming(fSql, () -> namedParameterJdbcTemplate.batchUpdate(fSql, fParams));
+			int[] counts = executeWithTiming(fSql, () -> namedParameterJdbcTemplate.batchUpdate(fSql, fParams));
+			return counts.length;
 		} catch (Exception e) {
-			log.error("批量新增异常", e);
-			throw new BusinessException("系统错误,请联系管理员");
+			throw businessError("batchInsertPO", e, DEFAULT_BIZ_ERROR_MSG, pos.get(0).getClass().getName(), pos.size());
 		}
-		return null;
 	}
 
 	@Override
 	public <PO extends MyTableEntity> Serializable batchInsertPO(List<PO> pos, boolean autoCreateId, int batchSize) {
+		if (pos == null || pos.isEmpty()) return 0;
+		if (batchSize <= 0) {
+			throw new IllegalArgumentException("batchSize must be greater than 0");
+		}
 		int totalSize = pos.size();
 		int batchCount = (int) Math.ceil((double) totalSize / batchSize);
 		int currentIndex = 0;
+		int affected = 0;
 		for (int i = 0; i < batchCount; i++) {
 			int remainingSize = totalSize - currentIndex;
 			int currentBatchSize = Math.min(batchSize, remainingSize);
 			List<PO> batchList = pos.subList(currentIndex, currentIndex + currentBatchSize);
-			this.batchInsertPO(batchList, autoCreateId);
+			Serializable result = this.batchInsertPO(batchList, autoCreateId);
+			if (result instanceof Number n) {
+				affected += n.intValue();
+			}
 			currentIndex += currentBatchSize;
 		}
-		return null;
+		return affected;
 	}
 
 }

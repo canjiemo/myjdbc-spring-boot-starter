@@ -140,7 +140,10 @@ spring:
 
 # 可选配置
 myjpa:
-  showsql: true          # 显示 SQL 日志（默认 true）
+  show-sql:
+    enabled: true        # 开启 SQL 日志（无需手动配置 logging.level）
+    sql-level: DEBUG     # org.springframework.jdbc.core.JdbcTemplate 的日志级别
+    param-level: TRACE   # org.springframework.jdbc.core.StatementCreatorUtils 的日志级别
   show-sql-time: false   # 打印每条 SQL 的实际执行耗时，INFO 级别输出（默认 false）
   validate-schema: true  # 启动时校验表结构
   tenant:

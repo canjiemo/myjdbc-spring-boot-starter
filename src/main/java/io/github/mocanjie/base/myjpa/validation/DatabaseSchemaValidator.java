@@ -10,6 +10,7 @@ import org.springframework.dao.DataAccessException;
 import org.springframework.jdbc.core.JdbcTemplate;
 
 import javax.sql.DataSource;
+import java.sql.Connection;
 import java.sql.DatabaseMetaData;
 import java.sql.ResultSet;
 import java.sql.SQLException;
@@ -189,7 +190,7 @@ public class DatabaseSchemaValidator implements Ordered {
      * 获取表的所有列名
      * 优先使用SQL查询，避免元数据API可能的性能问题
      */
-    private Set<String> getTableColumns(String tableName) throws SQLException {
+    private Set<String> getTableColumns(String tableName) {
         Set<String> columns = new HashSet<>();
 
         try {
@@ -221,21 +222,25 @@ public class DatabaseSchemaValidator implements Ordered {
         // 对于MySQL，表名区分大小写，尝试不同的表名变体
         String[] tableNameVariants = {tableName, tableName.toUpperCase(), tableName.toLowerCase()};
 
-        for (String tableNameVariant : tableNameVariants) {
-            try (ResultSet rs = dataSource.getConnection().getMetaData().getColumns(
-                    null, null, tableNameVariant, null)) {
+        try (Connection conn = dataSource.getConnection()) {
+            DatabaseMetaData metaData = conn.getMetaData();
+            for (String tableNameVariant : tableNameVariants) {
+                try (ResultSet rs = metaData.getColumns(null, null, tableNameVariant, null)) {
 
-                while (rs.next()) {
-                    columns.add(rs.getString("COLUMN_NAME"));
-                }
+                    while (rs.next()) {
+                        columns.add(rs.getString("COLUMN_NAME"));
+                    }
 
-                if (!columns.isEmpty()) {
-                    log.debug("元数据查询成功获取表 '{}' 的 {} 个字段", tableNameVariant, columns.size());
-                    break;
+                    if (!columns.isEmpty()) {
+                        log.debug("元数据查询成功获取表 '{}' 的 {} 个字段", tableNameVariant, columns.size());
+                        break;
+                    }
+                } catch (SQLException e) {
+                    log.debug("元数据查询表名变体 '{}' 失败: {}", tableNameVariant, e.getMessage());
                 }
-            } catch (SQLException e) {
-                log.debug("元数据查询表名变体 '{}' 失败: {}", tableNameVariant, e.getMessage());
             }
+        } catch (SQLException e) {
+            log.debug("获取数据库连接用于元数据查询失败: {}", e.getMessage());
         }
 
         return columns;
@@ -248,15 +253,19 @@ public class DatabaseSchemaValidator implements Ordered {
         Set<String> columns = new HashSet<>();
 
         try {
-            String sql = buildColumnQuerySql(tableName);
-            log.debug("执行SQL查询: {}", sql);
+            String targetTableName = normalizeTableNameByDatabase(tableName);
+            String sql = buildColumnQuerySql();
+            if (sql == null) {
+                return columns;
+            }
+            log.debug("执行SQL查询获取列信息, dbType={}, table={}", databaseType, targetTableName);
 
-            jdbcTemplate.query(sql, rs -> {
-                String columnName = rs.getString(1);
+            List<String> queryResult = jdbcTemplate.queryForList(sql, String.class, targetTableName);
+            for (String columnName : queryResult) {
                 if (columnName != null && !columnName.trim().isEmpty()) {
                     columns.add(columnName);
                 }
-            });
+            }
 
             log.debug("通过SQL查询获取到 {} 个字段", columns.size());
         } catch (DataAccessException e) {
@@ -271,19 +280,31 @@ public class DatabaseSchemaValidator implements Ordered {
     /**
      * 构建查询表列的SQL语句
      */
-    private String buildColumnQuerySql(String tableName) {
+    private String buildColumnQuerySql() {
         switch (databaseType.toLowerCase()) {
             case "mysql":
-                return String.format("SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = '%s'", tableName);
+                return "SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = ?";
             case "oracle":
-                return String.format("SELECT COLUMN_NAME FROM USER_TAB_COLUMNS WHERE TABLE_NAME = '%s'", tableName.toUpperCase());
+                return "SELECT COLUMN_NAME FROM USER_TAB_COLUMNS WHERE TABLE_NAME = ?";
             case "sqlserver":
-                return String.format("SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = '%s'", tableName);
+                return "SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = ?";
             case "postgresql":
             case "kingbasees":
-                return String.format("SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = '%s'", tableName.toLowerCase());
+                return "SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = ?";
             default:
-                return String.format("SELECT * FROM %s WHERE 1=0", tableName);
+                return null;
+        }
+    }
+
+    private String normalizeTableNameByDatabase(String tableName) {
+        switch (databaseType.toLowerCase()) {
+            case "oracle":
+                return tableName.toUpperCase();
+            case "postgresql":
+            case "kingbasees":
+                return tableName.toLowerCase();
+            default:
+                return tableName;
         }
     }
     
@@ -333,20 +354,28 @@ public class DatabaseSchemaValidator implements Ordered {
     }
     
     private boolean checkTableExistsGeneric(String tableName) {
-        try {
-            jdbcTemplate.queryForObject("SELECT 1 FROM " + tableName + " WHERE 1=0", Integer.class);
-            return true;
+        String[] tableNameVariants = {tableName, tableName.toUpperCase(), tableName.toLowerCase()};
+        try (Connection conn = dataSource.getConnection()) {
+            DatabaseMetaData metaData = conn.getMetaData();
+            for (String tableNameVariant : tableNameVariants) {
+                try (ResultSet rs = metaData.getTables(null, null, tableNameVariant, new String[]{"TABLE"})) {
+                    if (rs.next()) {
+                        return true;
+                    }
+                }
+            }
         } catch (Exception e) {
-            return false;
+            log.debug("通用方式检查表 '{}' 存在性失败: {}", tableName, e.getMessage());
         }
+        return false;
     }
     
     /**
      * 检测数据库类型
      */
     private String detectDatabaseType() {
-        try {
-            DatabaseMetaData metaData = dataSource.getConnection().getMetaData();
+        try (Connection conn = dataSource.getConnection()) {
+            DatabaseMetaData metaData = conn.getMetaData();
             String productName = metaData.getDatabaseProductName().toLowerCase();
             
             if (productName.contains("mysql")) {
