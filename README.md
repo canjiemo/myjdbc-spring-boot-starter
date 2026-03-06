@@ -146,6 +146,7 @@ myjpa:
     param-level: TRACE   # org.springframework.jdbc.core.StatementCreatorUtils 的日志级别
   show-sql-time: false   # 打印每条 SQL 的实际执行耗时，INFO 级别输出（默认 false）
   validate-schema: true  # 启动时校验表结构
+  fail-on-validation-error: false # 表结构校验失败时是否阻断启动
   tenant:
     enabled: false       # 多租户隔离开关（默认关闭，按需开启）
     column: tenant_id    # 租户字段列名（可自定义，如 org_id）
@@ -153,7 +154,8 @@ myjpa:
 
 ### MyJPA 配置总览（与代码同步）
 
-以下配置以 `src/main/java/io/github/mocanjie/base/myjpa/configuration/MyJpaAutoConfiguration.java` 为准：
+以下配置以 `src/main/java/io/github/mocanjie/base/myjpa/configuration/MyJpaProperties.java` 为准。
+旧配置别名兼容逻辑位于 `src/main/java/io/github/mocanjie/base/myjpa/configuration/MyJpaAutoConfiguration.java`。
 
 | 配置项 | 默认值 | 说明 |
 |---|---|---|
@@ -162,14 +164,15 @@ myjpa:
 | `myjpa.show-sql.param-level` | `TRACE` | `org.springframework.jdbc.core.StatementCreatorUtils` 日志级别 |
 | `myjpa.show-sql-time` | `false` | 是否打印每条 SQL 执行耗时（`INFO`） |
 | `myjpa.validate-schema` | `true` | 启动时是否执行数据库表结构校验 |
+| `myjpa.fail-on-validation-error` | `false` | 校验失败时是否中止应用启动 |
 | `myjpa.tenant.enabled` | `false` | 是否开启多租户 SQL 条件注入 |
 | `myjpa.tenant.column` | `tenant_id` | 租户列名 |
 
-补充项（JVM 系统参数）：
+补充说明：
 
-| 参数 | 默认值 | 说明 |
-|---|---|---|
-| `-Dmyjpa.fail-on-validation-error` | `false` | `true` 时，数据库模式校验失败将阻断应用启动 |
+| 项 | 说明 |
+|---|---|
+| JVM 系统参数 | `-Dmyjpa.fail-on-validation-error=true` 仍然可用，Spring 会自动绑定到同名配置项 |
 
 兼容旧配置（建议迁移到新键名）：
 
@@ -184,7 +187,7 @@ myjpa:
 
 每次涉及 `myjpa.*` 配置变更，按下面步骤同步：
 
-1. 修改代码配置源（当前在 `MyJpaAutoConfiguration` 的 `@Value`）。
+1. 修改代码配置源（当前主配置模型在 `MyJpaProperties`）。
 2. 同步更新本节「MyJPA 配置总览（与代码同步）」表格。
 3. 若引入兼容别名，更新「兼容旧配置」映射表。
 4. 至少补一个测试，覆盖新配置默认值或行为分支。

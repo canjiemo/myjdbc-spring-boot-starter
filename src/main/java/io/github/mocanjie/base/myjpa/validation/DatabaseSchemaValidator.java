@@ -1,7 +1,7 @@
 package io.github.mocanjie.base.myjpa.validation;
 
 import io.github.mocanjie.base.myjpa.cache.TableCacheManager;
-import io.github.mocanjie.base.myjpa.parser.JSqlDynamicSqlParser;
+import io.github.mocanjie.base.myjpa.configuration.MyJpaProperties;
 import jakarta.annotation.PostConstruct;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -27,15 +27,19 @@ public class DatabaseSchemaValidator implements Ordered {
 
     private final JdbcTemplate jdbcTemplate;
     private final DataSource dataSource;
+    private final boolean tenantIsolationEnabled;
+    private final String tenantColumn;
     private String databaseType;
 
     // 实例级执行标记，避免同 JVM 多个 ApplicationContext 之间相互污染
     private volatile boolean validationExecuted = false;
     private final Object validationLock = new Object();
     
-    public DatabaseSchemaValidator(JdbcTemplate jdbcTemplate, DataSource dataSource) {
+    public DatabaseSchemaValidator(JdbcTemplate jdbcTemplate, DataSource dataSource, MyJpaProperties properties) {
         this.jdbcTemplate = jdbcTemplate;
         this.dataSource = dataSource;
+        this.tenantIsolationEnabled = properties != null && properties.getTenant().isEnabled();
+        this.tenantColumn = resolveTenantColumn(properties);
         this.databaseType = detectDatabaseType();
     }
     
@@ -142,14 +146,13 @@ public class DatabaseSchemaValidator implements Ordered {
             }
 
             // 检查租户字段（如果启用了多租户隔离）
-            if (JSqlDynamicSqlParser.tenantEnabled) {
-                String tenantCol = JSqlDynamicSqlParser.tenantColumn;
-                if (tenantCol != null && !tenantCol.isEmpty()) {
-                    if (containsIgnoreCase(columns, tenantCol)) {
+            if (tenantIsolationEnabled) {
+                if (!tenantColumn.isEmpty()) {
+                    if (containsIgnoreCase(columns, tenantColumn)) {
                         TableCacheManager.registerTenantTable(tableName);
-                        result.addSuccess(tableName, String.format("租户字段 '%s' 存在，已启用租户隔离", tenantCol));
+                        result.addSuccess(tableName, String.format("租户字段 '%s' 存在，已启用租户隔离", tenantColumn));
                     } else {
-                        log.debug("表 '{}' 不包含租户字段 '{}'，不启用租户隔离", tableName, tenantCol);
+                        log.debug("表 '{}' 不包含租户字段 '{}'，不启用租户隔离", tableName, tenantColumn);
                     }
                 }
             }
@@ -419,6 +422,13 @@ public class DatabaseSchemaValidator implements Ordered {
      */
     private Set<String> getAllCachedTableNames() {
         return TableCacheManager.getAllTableNames();
+    }
+
+    private static String resolveTenantColumn(MyJpaProperties properties) {
+        if (properties == null || properties.getTenant().getColumn() == null || properties.getTenant().getColumn().isBlank()) {
+            return "tenant_id";
+        }
+        return properties.getTenant().getColumn().trim();
     }
 
     private record QuerySpec(String sql, Object[] args) {}

@@ -6,6 +6,7 @@ import io.github.mocanjie.base.myjpa.MyTableEntity;
 import io.github.mocanjie.base.myjpa.builder.SqlBuilder;
 import io.github.mocanjie.base.myjpa.builder.TableInfoBuilder;
 import io.github.mocanjie.base.myjpa.cache.TableCacheManager;
+import io.github.mocanjie.base.myjpa.configuration.MyJpaProperties;
 import io.github.mocanjie.base.myjpa.dao.IBaseDao;
 import io.github.mocanjie.base.myjpa.error.MyJpaErrorCode;
 import io.github.mocanjie.base.myjpa.metadata.TableInfo;
@@ -34,6 +35,7 @@ import java.lang.reflect.Field;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -41,14 +43,25 @@ import java.util.concurrent.ConcurrentHashMap;
 public class BaseDaoImpl implements IBaseDao {
 
 	protected static Logger log = LoggerFactory.getLogger(BaseDaoImpl.class);
-
-	/** 是否打印 SQL 执行时间，由 MyJpaAutoConfiguration 根据 myjpa.show-sql-time 配置同步 */
-	public static volatile boolean showSqlTime = false;
 	private static final SingleColumnRowMapper<Long> COUNT_ROW_MAPPER = new SingleColumnRowMapper<>(Long.class);
 	private final Map<Class<?>, RowMapper<?>> rowMapperCache = new ConcurrentHashMap<>();
+	// 高频 DAO 路径只读这些快照字段，避免每次执行 SQL 都走可变配置对象访问。
+	private final boolean showSqlTimeEnabled;
+	private final boolean tenantIsolationEnabled;
+	private final String tenantColumn;
+	private final String tenantColumnLowerCase;
+	private final String tenantFieldName;
+
+	public BaseDaoImpl(MyJpaProperties properties) {
+		this.showSqlTimeEnabled = properties != null && properties.isShowSqlTime();
+		this.tenantIsolationEnabled = properties != null && properties.getTenant().isEnabled();
+		this.tenantColumn = resolveTenantColumn(properties);
+		this.tenantColumnLowerCase = this.tenantColumn.toLowerCase(Locale.ROOT);
+		this.tenantFieldName = io.github.mocanjie.base.myjpa.utils.CommonUtils.underscoreToCamelCase(this.tenantColumn);
+	}
 
 	private <T> T executeWithTiming(String sql, java.util.function.Supplier<T> operation) {
-		if (!showSqlTime) return operation.get();
+		if (!showSqlTimeEnabled) return operation.get();
 		long start = System.currentTimeMillis();
 		T result = operation.get();
 		log.info("[MyJPA] {}ms ← {}", System.currentTimeMillis() - start, sql);
@@ -103,12 +116,12 @@ public class BaseDaoImpl implements IBaseDao {
 	 * tenantId=null（超管）时不改写 SQL，避免 :myjpaTenantId 占位符缺少参数导致运行时异常。
 	 */
 	private ConditionResult applyConditions(String sql, SqlParameterSource sps) {
-		boolean needTenant = JSqlDynamicSqlParser.tenantEnabled && !TenantContext.isSkipped();
+		boolean needTenant = tenantIsolationEnabled && !TenantContext.isSkipped();
 		Object tenantId = needTenant ? getCurrentTenantId() : null;
 
 		if (tenantId != null) {
 			// 单次解析：同时注入删除条件 + 租户条件
-			String processedSql = JSqlDynamicSqlParser.appendConditions(sql);
+			String processedSql = JSqlDynamicSqlParser.appendConditions(sql, true, tenantColumn);
 			if (processedSql.contains(":" + JSqlDynamicSqlParser.TENANT_PARAM_NAME)) {
 				return new ConditionResult(processedSql,
 						new TenantAwareSqlParameterSource(sps, JSqlDynamicSqlParser.TENANT_PARAM_NAME, tenantId));
@@ -140,7 +153,7 @@ public class BaseDaoImpl implements IBaseDao {
 	 * 返回 null 表示不需要注入（全局关闭 / 跳过 / 超管 / 表无租户列）。
 	 */
 	private Object getWriteTenantId(String tableName) {
-		if (!JSqlDynamicSqlParser.tenantEnabled || TenantContext.isSkipped()) return null;
+		if (!tenantIsolationEnabled || TenantContext.isSkipped()) return null;
 		if (!TableCacheManager.hasTenantColumn(tableName)) return null;
 		return getCurrentTenantId();
 	}
@@ -152,7 +165,7 @@ public class BaseDaoImpl implements IBaseDao {
 	private ConditionResult applyWriteConditions(String sql, SqlParameterSource sps, String tableName) {
 		Object tenantId = getWriteTenantId(tableName);
 		if (tenantId == null) return new ConditionResult(sql, sps);
-		String processedSql = sql + " AND " + JSqlDynamicSqlParser.tenantColumn
+		String processedSql = sql + " AND " + tenantColumn
 				+ " = :" + JSqlDynamicSqlParser.TENANT_PARAM_NAME;
 		return new ConditionResult(processedSql,
 				new TenantAwareSqlParameterSource(sps, JSqlDynamicSqlParser.TENANT_PARAM_NAME, tenantId));
@@ -279,8 +292,8 @@ public class BaseDaoImpl implements IBaseDao {
 
 			// 租户处理：SQL 未含租户列（ignoreNull=true 时字段为 null 被跳过）→ 追加列+参数
 			Object tenantId = getWriteTenantId(tableInfo.getTableName());
-			if (tenantId != null && !sql.toLowerCase().contains(JSqlDynamicSqlParser.tenantColumn.toLowerCase())) {
-				sql = JSqlDynamicSqlParser.appendTenantToInsertSql(sql);
+			if (tenantId != null && !sql.toLowerCase(Locale.ROOT).contains(tenantColumnLowerCase)) {
+				sql = JSqlDynamicSqlParser.appendTenantToInsertSql(sql, true, tenantColumn);
 				paramSource = new TenantAwareSqlParameterSource(paramSource, JSqlDynamicSqlParser.TENANT_PARAM_NAME, tenantId);
 			}
 
@@ -358,7 +371,7 @@ public class BaseDaoImpl implements IBaseDao {
 			Object tenantId = getWriteTenantId(tableInfo.getTableName());
 			SqlParameterSource[] params;
 			if (tenantId != null) {
-				sql = sql + " AND " + JSqlDynamicSqlParser.tenantColumn
+				sql = sql + " AND " + tenantColumn
 						+ " = :" + JSqlDynamicSqlParser.TENANT_PARAM_NAME;
 				List<SqlParameterSource> spsList = new ArrayList<>(id.length);
 				for (Object o : id) {
@@ -400,11 +413,9 @@ public class BaseDaoImpl implements IBaseDao {
 			SqlParameterSource[] params;
 
 			if (tenantId != null) {
-				boolean sqlHasTenantCol = sql.toLowerCase().contains(JSqlDynamicSqlParser.tenantColumn.toLowerCase());
+				boolean sqlHasTenantCol = sql.toLowerCase(Locale.ROOT).contains(tenantColumnLowerCase);
 				if (sqlHasTenantCol) {
 					// POJO 有租户字段（ignoreNull=false 包含了它）→ 反射批量赋值（字段为 null 时赋值）
-					String tenantFieldName = io.github.mocanjie.base.myjpa.utils.CommonUtils
-							.underscoreToCamelCase(JSqlDynamicSqlParser.tenantColumn);
 					Field tenantField = findFieldInHierarchy(pos.get(0).getClass(), tenantFieldName);
 					if (tenantField != null) {
 						tenantField.setAccessible(true);
@@ -413,7 +424,7 @@ public class BaseDaoImpl implements IBaseDao {
 					params = SqlParameterSourceUtils.createBatch(pos);
 				} else {
 					// POJO 没有租户字段 → SQL 追加列，每个元素包装 TenantAwareSqlParameterSource
-					sql = JSqlDynamicSqlParser.appendTenantToInsertSql(sql);
+					sql = JSqlDynamicSqlParser.appendTenantToInsertSql(sql, true, tenantColumn);
 					final Object tid = tenantId;
 					List<SqlParameterSource> spsList = new ArrayList<>(pos.size());
 					for (PO po : pos) {
@@ -456,6 +467,13 @@ public class BaseDaoImpl implements IBaseDao {
 			currentIndex += currentBatchSize;
 		}
 		return affected;
+	}
+
+	private static String resolveTenantColumn(MyJpaProperties properties) {
+		if (properties == null || properties.getTenant().getColumn() == null || properties.getTenant().getColumn().isBlank()) {
+			return "tenant_id";
+		}
+		return properties.getTenant().getColumn().trim();
 	}
 
 }

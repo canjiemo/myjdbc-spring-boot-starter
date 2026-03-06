@@ -28,6 +28,9 @@ import static org.junit.jupiter.api.Assertions.*;
 @DisplayName("多租户隔离功能测试")
 class TenantIsolationTest {
 
+    private boolean tenantEnabled;
+    private String tenantColumn;
+
     @BeforeAll
     static void setup() {
         // 初始化 @MyTable 缓存（user 有 delete_flag，role 有 is_deleted）
@@ -42,15 +45,25 @@ class TenantIsolationTest {
     void resetTenantState() {
         // 每个测试前重置状态，避免相互干扰
         TenantContext.clear();
-        JSqlDynamicSqlParser.tenantEnabled = true;
-        JSqlDynamicSqlParser.tenantColumn = "tenant_id";
+        tenantEnabled = true;
+        tenantColumn = "tenant_id";
     }
 
     @AfterAll
     static void teardown() {
-        // 恢复默认值，避免影响其他测试类
-        JSqlDynamicSqlParser.tenantEnabled = false;
         TenantContext.clear();
+    }
+
+    private String appendTenantCondition(String sql) {
+        return JSqlDynamicSqlParser.appendTenantCondition(sql, tenantEnabled, tenantColumn);
+    }
+
+    private String appendConditions(String sql) {
+        return JSqlDynamicSqlParser.appendConditions(sql, tenantEnabled, tenantColumn);
+    }
+
+    private String appendTenantToInsertSql(String sql) {
+        return JSqlDynamicSqlParser.appendTenantToInsertSql(sql, tenantEnabled, tenantColumn);
     }
 
     // =========================================================
@@ -61,9 +74,9 @@ class TenantIsolationTest {
     @Order(1)
     @DisplayName("1.1 默认关闭时不注入租户条件")
     void test01_globalDisabledSkips() {
-        JSqlDynamicSqlParser.tenantEnabled = false;
+        tenantEnabled = false;
         String sql = "SELECT * FROM user";
-        String result = JSqlDynamicSqlParser.appendTenantCondition(sql);
+        String result = appendTenantCondition(sql);
         assertEquals(sql, result, "全局关闭时 SQL 不应被修改");
     }
 
@@ -71,7 +84,7 @@ class TenantIsolationTest {
     @Order(2)
     @DisplayName("1.2 全局开启后注入租户条件")
     void test02_globalEnabledInjects() {
-        String result = JSqlDynamicSqlParser.appendTenantCondition("SELECT * FROM user");
+        String result = appendTenantCondition("SELECT * FROM user");
         assertTrue(result.contains(":myjpaTenantId"),
                 "全局开启时应注入 :myjpaTenantId 占位符");
         assertTrue(result.toLowerCase().contains("tenant_id"),
@@ -86,7 +99,7 @@ class TenantIsolationTest {
     @Order(3)
     @DisplayName("2.1 单表注入 — WHERE 子句")
     void test03_singleTableInjection() {
-        String result = JSqlDynamicSqlParser.appendTenantCondition(
+        String result = appendTenantCondition(
                 "SELECT id, username FROM user WHERE age > 18");
         assertTrue(result.contains("user.tenant_id = :myjpaTenantId"),
                 "应在 WHERE 注入 user.tenant_id = :myjpaTenantId");
@@ -97,7 +110,7 @@ class TenantIsolationTest {
     @Order(4)
     @DisplayName("2.2 带别名的表注入")
     void test04_aliasedTableInjection() {
-        String result = JSqlDynamicSqlParser.appendTenantCondition(
+        String result = appendTenantCondition(
                 "SELECT u.id, u.username FROM user u WHERE u.age > 18");
         assertTrue(result.contains("u.tenant_id = :myjpaTenantId"),
                 "使用别名时应用别名限定 tenant_id");
@@ -107,7 +120,7 @@ class TenantIsolationTest {
     @Order(5)
     @DisplayName("2.3 无 WHERE 的 SQL 自动添加 WHERE")
     void test05_noWhereClause() {
-        String result = JSqlDynamicSqlParser.appendTenantCondition(
+        String result = appendTenantCondition(
                 "SELECT * FROM user");
         assertTrue(result.toLowerCase().contains("where"),
                 "无 WHERE 时应自动添加 WHERE 子句");
@@ -123,7 +136,7 @@ class TenantIsolationTest {
     @DisplayName("3.1 LEFT JOIN — 租户条件追加到 ON 子句")
     void test06_leftJoinTenantInOn() {
         String sql = "SELECT u.id, r.role_name FROM user u LEFT JOIN role r ON u.role_id = r.id";
-        String result = JSqlDynamicSqlParser.appendTenantCondition(sql);
+        String result = appendTenantCondition(sql);
         // user 有 tenant_id → 注入到 WHERE；role 没有 tenant_id → 不注入
         assertTrue(result.contains("u.tenant_id = :myjpaTenantId"),
                 "user 表租户条件应在 WHERE 中");
@@ -140,7 +153,7 @@ class TenantIsolationTest {
         TableCacheManager.registerTenantTable("role");
         try {
             String sql = "SELECT u.id, r.role_name FROM user u LEFT JOIN role r ON u.role_id = r.id";
-            String result = JSqlDynamicSqlParser.appendTenantCondition(sql);
+            String result = appendTenantCondition(sql);
             // user（主表） → WHERE
             assertTrue(result.contains("u.tenant_id = :myjpaTenantId"),
                     "user 主表租户条件应在 WHERE 中");
@@ -163,7 +176,7 @@ class TenantIsolationTest {
         TableCacheManager.registerTenantTable("role");
         try {
             String sql = "SELECT u.id, r.role_name FROM user u INNER JOIN role r ON u.role_id = r.id";
-            String result = JSqlDynamicSqlParser.appendTenantCondition(sql);
+            String result = appendTenantCondition(sql);
             // 两者都应在 WHERE 中
             assertTrue(result.contains("u.tenant_id = :myjpaTenantId"),
                     "user INNER JOIN 租户条件应在 WHERE");
@@ -186,7 +199,7 @@ class TenantIsolationTest {
     void test09_parserAlwaysInjectsWhenEnabled() {
         // Parser 层不知道 tenantId 是否为 null，只要表有 tenant_id 就注入占位符
         // tenantId=null 的过滤在 BaseDaoImpl.applyTenant() 中处理（不调用 appendTenantCondition）
-        String result = JSqlDynamicSqlParser.appendTenantCondition("SELECT * FROM user");
+        String result = appendTenantCondition("SELECT * FROM user");
         assertTrue(result.contains(":myjpaTenantId"),
                 "Parser 层只管 SQL 改写，占位符应存在");
     }
@@ -224,7 +237,7 @@ class TenantIsolationTest {
     void test12_skipViaContext() {
         TenantContext.skip();
         try {
-            String result = JSqlDynamicSqlParser.appendTenantCondition("SELECT * FROM user");
+            String result = appendTenantCondition("SELECT * FROM user");
             assertFalse(result.contains(":myjpaTenantId"),
                     "skip() 后不应注入租户条件");
             assertEquals("SELECT * FROM user", result, "SQL 应保持不变");
@@ -239,7 +252,7 @@ class TenantIsolationTest {
     void test13_withoutTenantLambda() {
         String[] resultHolder = new String[1];
         TenantContext.withoutTenant(() -> {
-            resultHolder[0] = JSqlDynamicSqlParser.appendTenantCondition("SELECT * FROM user");
+            resultHolder[0] = appendTenantCondition("SELECT * FROM user");
         });
 
         assertFalse(resultHolder[0].contains(":myjpaTenantId"),
@@ -248,7 +261,7 @@ class TenantIsolationTest {
         assertFalse(TenantContext.isSkipped(), "withoutTenant 执行后 skip 状态应清除");
 
         // 恢复后再调用应该正常注入
-        String normal = JSqlDynamicSqlParser.appendTenantCondition("SELECT * FROM user");
+        String normal = appendTenantCondition("SELECT * FROM user");
         assertTrue(normal.contains(":myjpaTenantId"), "恢复后应正常注入");
     }
 
@@ -274,7 +287,7 @@ class TenantIsolationTest {
     @DisplayName("6.1 已有 tenant_id 条件不重复注入")
     void test15_idempotency() {
         String sqlWithTenant = "SELECT * FROM user WHERE user.tenant_id = :myjpaTenantId";
-        String result = JSqlDynamicSqlParser.appendTenantCondition(sqlWithTenant);
+        String result = appendTenantCondition(sqlWithTenant);
         // :myjpaTenantId 应只出现一次
         int count = countOccurrences(result, ":myjpaTenantId");
         assertEquals(1, count, "已有租户条件时，:myjpaTenantId 不应重复注入，当前出现次数=" + count);
@@ -285,8 +298,8 @@ class TenantIsolationTest {
     @DisplayName("6.2 多次调用幂等")
     void test16_multipleCallsIdempotent() {
         String sql = "SELECT * FROM user";
-        String once = JSqlDynamicSqlParser.appendTenantCondition(sql);
-        String twice = JSqlDynamicSqlParser.appendTenantCondition(once);
+        String once = appendTenantCondition(sql);
+        String twice = appendTenantCondition(once);
         assertEquals(once, twice, "多次调用结果应相同（幂等）");
     }
 
@@ -298,7 +311,7 @@ class TenantIsolationTest {
     @Order(17)
     @DisplayName("7.1 role 表无 tenant_id 字段 — 不注入")
     void test17_tableWithoutTenantSkipped() {
-        String result = JSqlDynamicSqlParser.appendTenantCondition("SELECT * FROM role");
+        String result = appendTenantCondition("SELECT * FROM role");
         assertFalse(result.contains(":myjpaTenantId"),
                 "role 表未注册租户字段，不应注入租户条件");
     }
@@ -308,7 +321,7 @@ class TenantIsolationTest {
     @DisplayName("7.2 未知表不注入")
     void test18_unknownTableSkipped() {
         String sql = "SELECT * FROM sys_config WHERE key = 'value'";
-        String result = JSqlDynamicSqlParser.appendTenantCondition(sql);
+        String result = appendTenantCondition(sql);
         assertEquals(sql, result, "未知表不应被修改");
     }
 
@@ -322,7 +335,7 @@ class TenantIsolationTest {
     void test19_deleteAndTenantCombined() {
         String sql = "SELECT * FROM user";
         String withDelete = JSqlDynamicSqlParser.appendDeleteCondition(sql);
-        String withBoth = JSqlDynamicSqlParser.appendTenantCondition(withDelete);
+        String withBoth = appendTenantCondition(withDelete);
 
         assertTrue(withBoth.contains("delete_flag"),
                 "应包含逻辑删除条件");
@@ -342,7 +355,7 @@ class TenantIsolationTest {
         try {
             String sql = "SELECT u.id, r.role_name FROM user u LEFT JOIN role r ON u.role_id = r.id WHERE u.age > 18";
             String withDelete = JSqlDynamicSqlParser.appendDeleteCondition(sql);
-            String withBoth = JSqlDynamicSqlParser.appendTenantCondition(withDelete);
+            String withBoth = appendTenantCondition(withDelete);
 
             // user 主表：delete_flag 和 tenant_id 都在 WHERE
             assertTrue(withBoth.contains("u.delete_flag"), "user 删除条件应在 WHERE");
@@ -365,18 +378,18 @@ class TenantIsolationTest {
     @Order(21)
     @DisplayName("9.1 自定义租户列名（org_id）")
     void test21_customTenantColumnName() {
-        JSqlDynamicSqlParser.tenantColumn = "org_id";
+        tenantColumn = "org_id";
         // 重新注册：原来基于 "tenant_id" 的注册对 "org_id" 无效
         // 直接注册一个测试用表来验证列名替换逻辑
         TableCacheManager.registerTenantTable("user"); // user 已注册，org_id 作为列名
         try {
-            String result = JSqlDynamicSqlParser.appendTenantCondition("SELECT * FROM user");
+            String result = appendTenantCondition("SELECT * FROM user");
             assertTrue(result.contains("org_id = :myjpaTenantId"),
                     "自定义列名时应使用 org_id 而非 tenant_id");
             assertFalse(result.contains("tenant_id = :myjpaTenantId"),
                     "不应再出现默认的 tenant_id");
         } finally {
-            JSqlDynamicSqlParser.tenantColumn = "tenant_id"; // 恢复
+            tenantColumn = "tenant_id"; // 恢复
         }
     }
 
@@ -389,7 +402,7 @@ class TenantIsolationTest {
     @DisplayName("10.1 子查询中的 user 表也注入租户条件")
     void test22_subQueryInjection() {
         String sql = "SELECT * FROM (SELECT id, username FROM user WHERE age > 18) t";
-        String result = JSqlDynamicSqlParser.appendTenantCondition(sql);
+        String result = appendTenantCondition(sql);
         assertTrue(result.contains("tenant_id = :myjpaTenantId"),
                 "子查询中的 user 表也应注入租户条件");
     }
@@ -400,7 +413,7 @@ class TenantIsolationTest {
     void test23_unionQueryInjection() {
         String sql = "SELECT id, username FROM user WHERE status = 1 "
                 + "UNION ALL SELECT id, username FROM user WHERE status = 2";
-        String result = JSqlDynamicSqlParser.appendTenantCondition(sql);
+        String result = appendTenantCondition(sql);
         int count = countOccurrences(result, ":myjpaTenantId");
         assertEquals(2, count, "UNION 两边的 user 表各应注入一次租户条件，共2次");
     }
@@ -417,10 +430,10 @@ class TenantIsolationTest {
 
         // 分步（两次解析）
         String step1 = JSqlDynamicSqlParser.appendDeleteCondition(sql);
-        String stepByStep = JSqlDynamicSqlParser.appendTenantCondition(step1);
+        String stepByStep = appendTenantCondition(step1);
 
         // 合并（一次解析）
-        String combined = JSqlDynamicSqlParser.appendConditions(sql);
+        String combined = appendConditions(sql);
 
         // 两者包含的关键条件应一致
         assertTrue(combined.contains("delete_flag"), "合并路径应包含逻辑删除条件");
@@ -433,13 +446,13 @@ class TenantIsolationTest {
     @Order(25)
     @DisplayName("11.2 appendConditions 在租户关闭时仍注入逻辑删除条件")
     void test25_appendConditionsWithTenantDisabledStillInjectsDelete() {
-        JSqlDynamicSqlParser.tenantEnabled = false;
+        tenantEnabled = false;
         try {
-            String result = JSqlDynamicSqlParser.appendConditions("SELECT * FROM user");
+            String result = appendConditions("SELECT * FROM user");
             assertTrue(result.contains("delete_flag"), "租户关闭时仍应注入逻辑删除条件");
             assertFalse(result.contains(":myjpaTenantId"), "租户关闭时不应注入租户条件");
         } finally {
-            JSqlDynamicSqlParser.tenantEnabled = true;
+            tenantEnabled = true;
         }
     }
 
@@ -450,7 +463,7 @@ class TenantIsolationTest {
         TableCacheManager.registerTenantTable("role");
         try {
             String sql = "SELECT u.id, r.role_name FROM user u LEFT JOIN role r ON u.role_id = r.id";
-            String result = JSqlDynamicSqlParser.appendConditions(sql);
+            String result = appendConditions(sql);
 
             // user 主表：删除+租户 在 WHERE
             assertTrue(result.contains("u.delete_flag"), "user 删除条件应在 WHERE");
@@ -473,8 +486,8 @@ class TenantIsolationTest {
     @DisplayName("11.4 appendConditions 幂等性")
     void test27_appendConditionsIdempotent() {
         String sql = "SELECT * FROM user";
-        String once = JSqlDynamicSqlParser.appendConditions(sql);
-        String twice = JSqlDynamicSqlParser.appendConditions(once);
+        String once = appendConditions(sql);
+        String twice = appendConditions(once);
         assertEquals(once, twice, "appendConditions 多次调用应幂等");
     }
 
@@ -483,7 +496,7 @@ class TenantIsolationTest {
     @DisplayName("11.5 无 @MyTable 缓存的表，appendConditions 返回原 SQL")
     void test28_appendConditionsUnknownTable() {
         String sql = "SELECT * FROM audit_log WHERE action = 'LOGIN'";
-        String result = JSqlDynamicSqlParser.appendConditions(sql);
+        String result = appendConditions(sql);
         assertEquals(sql, result, "无缓存配置的表不应被修改");
     }
 
@@ -496,7 +509,7 @@ class TenantIsolationTest {
     @DisplayName("12.1 INSERT SQL 未含租户列时自动追加列和占位符")
     void test29_insertSqlTenantAppended() {
         String sql = "INSERT INTO user(name, email) VALUES (:name, :email)";
-        String result = JSqlDynamicSqlParser.appendTenantToInsertSql(sql);
+        String result = appendTenantToInsertSql(sql);
         assertEquals("INSERT INTO user(name, email, tenant_id) VALUES (:name, :email, :myjpaTenantId)",
                 result, "应在列列表和值列表末尾追加 tenant_id / :myjpaTenantId");
     }
@@ -506,7 +519,7 @@ class TenantIsolationTest {
     @DisplayName("12.2 INSERT SQL 已含租户列时幂等，不重复追加")
     void test30_insertSqlIdempotent() {
         String sql = "INSERT INTO user(name, tenant_id) VALUES (:name, :tenantId)";
-        String result = JSqlDynamicSqlParser.appendTenantToInsertSql(sql);
+        String result = appendTenantToInsertSql(sql);
         assertEquals(sql, result, "已含租户列时 SQL 不应被修改");
         assertEquals(1, countOccurrences(result.toLowerCase(), "tenant_id"),
                 "tenant_id 应只出现一次");
@@ -516,9 +529,9 @@ class TenantIsolationTest {
     @Order(31)
     @DisplayName("12.3 tenantEnabled=false 时 appendTenantToInsertSql 不修改 SQL")
     void test31_insertSqlDisabledSkips() {
-        JSqlDynamicSqlParser.tenantEnabled = false;
+        tenantEnabled = false;
         String sql = "INSERT INTO user(name) VALUES (:name)";
-        String result = JSqlDynamicSqlParser.appendTenantToInsertSql(sql);
+        String result = appendTenantToInsertSql(sql);
         assertEquals(sql, result, "全局关闭时 SQL 不应被修改");
     }
 
@@ -526,15 +539,15 @@ class TenantIsolationTest {
     @Order(32)
     @DisplayName("12.4 自定义租户列名（org_id）时 INSERT SQL 追加正确的列名")
     void test32_insertSqlCustomColumn() {
-        JSqlDynamicSqlParser.tenantColumn = "org_id";
+        tenantColumn = "org_id";
         try {
             String sql = "INSERT INTO user(name) VALUES (:name)";
-            String result = JSqlDynamicSqlParser.appendTenantToInsertSql(sql);
+            String result = appendTenantToInsertSql(sql);
             assertTrue(result.contains("org_id"), "应追加自定义列名 org_id");
             assertFalse(result.contains("tenant_id"), "不应出现默认列名 tenant_id");
             assertTrue(result.contains(":myjpaTenantId"), "占位符应为 :myjpaTenantId");
         } finally {
-            JSqlDynamicSqlParser.tenantColumn = "tenant_id";
+            tenantColumn = "tenant_id";
         }
     }
 
@@ -543,7 +556,7 @@ class TenantIsolationTest {
     @DisplayName("12.5 INSERT SQL 单字段极简情况正确追加")
     void test33_insertSqlSingleField() {
         String sql = "INSERT INTO user(name) VALUES (:name)";
-        String result = JSqlDynamicSqlParser.appendTenantToInsertSql(sql);
+        String result = appendTenantToInsertSql(sql);
         assertEquals("INSERT INTO user(name, tenant_id) VALUES (:name, :myjpaTenantId)",
                 result, "单字段 INSERT 也应正确追加");
     }
@@ -557,7 +570,7 @@ class TenantIsolationTest {
     @DisplayName("13.1 WHERE IN 子查询：子查询内 user 表注入租户条件")
     void test34_inSubQueryTenantInjection() {
         String sql = "SELECT * FROM role WHERE id IN (SELECT role_id FROM user WHERE age > 18)";
-        String result = JSqlDynamicSqlParser.appendTenantCondition(sql);
+        String result = appendTenantCondition(sql);
         // IN 子查询内 user 表有 tenant_id → 应注入
         assertTrue(result.contains("tenant_id = :myjpaTenantId"),
                 "IN 子查询内 user 表应注入租户条件");
@@ -568,7 +581,7 @@ class TenantIsolationTest {
     @DisplayName("13.2 WHERE NOT IN 子查询：子查询内 user 表注入租户条件")
     void test35_notInSubQueryTenantInjection() {
         String sql = "SELECT * FROM role WHERE id NOT IN (SELECT role_id FROM user)";
-        String result = JSqlDynamicSqlParser.appendTenantCondition(sql);
+        String result = appendTenantCondition(sql);
         assertTrue(result.contains("tenant_id = :myjpaTenantId"),
                 "NOT IN 子查询内 user 表应注入租户条件");
     }
@@ -578,7 +591,7 @@ class TenantIsolationTest {
     @DisplayName("13.3 WHERE EXISTS 子查询：子查询内 user 表注入租户条件")
     void test36_existsSubQueryTenantInjection() {
         String sql = "SELECT * FROM role r WHERE EXISTS (SELECT 1 FROM user u WHERE u.role_id = r.id)";
-        String result = JSqlDynamicSqlParser.appendTenantCondition(sql);
+        String result = appendTenantCondition(sql);
         assertTrue(result.contains("tenant_id = :myjpaTenantId"),
                 "EXISTS 子查询内 user 表应注入租户条件");
     }
@@ -588,7 +601,7 @@ class TenantIsolationTest {
     @DisplayName("13.4 WHERE NOT EXISTS 子查询：子查询内 user 表注入租户条件")
     void test37_notExistsSubQueryTenantInjection() {
         String sql = "SELECT * FROM role r WHERE NOT EXISTS (SELECT 1 FROM user u WHERE u.role_id = r.id)";
-        String result = JSqlDynamicSqlParser.appendTenantCondition(sql);
+        String result = appendTenantCondition(sql);
         assertTrue(result.contains("tenant_id = :myjpaTenantId"),
                 "NOT EXISTS 子查询内 user 表应注入租户条件");
     }
@@ -598,7 +611,7 @@ class TenantIsolationTest {
     @DisplayName("13.5 appendConditions 合并路径：IN 子查询同时注入删除条件和租户条件")
     void test38_appendConditionsInSubQuery() {
         String sql = "SELECT * FROM role WHERE id IN (SELECT role_id FROM user WHERE age > 18)";
-        String result = JSqlDynamicSqlParser.appendConditions(sql);
+        String result = appendConditions(sql);
         // IN 子查询内 user 表：delete_flag + tenant_id 都应注入
         assertTrue(result.contains("delete_flag"),
                 "IN 子查询内 user 的 delete_flag 应由合并路径注入");

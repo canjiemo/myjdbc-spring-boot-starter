@@ -25,14 +25,6 @@ public class JSqlDynamicSqlParser {
 
     private static final Logger log = LoggerFactory.getLogger(JSqlDynamicSqlParser.class);
 
-    // ===================== 租户配置（由 MyJpaAutoConfiguration 初始化时设置）=====================
-
-    /** 是否启用多租户隔离，默认 false（需显式配置 myjpa.tenant.enabled=true 开启） */
-    public static volatile boolean tenantEnabled = false;
-
-    /** 租户字段的数据库列名，默认 tenant_id */
-    public static volatile String tenantColumn = "tenant_id";
-
     /** 租户参数名（SQL 占位符名称），内部固定，不对外暴露 */
     public static final String TENANT_PARAM_NAME = "myjpaTenantId";
 
@@ -49,16 +41,17 @@ public class JSqlDynamicSqlParser {
      * @param sql 原始 INSERT SQL
      * @return 追加租户列后的 SQL；全局关闭、已含租户列或格式无法识别时返回原 SQL
      */
-    public static String appendTenantToInsertSql(String sql) {
+    public static String appendTenantToInsertSql(String sql, boolean tenantEnabled, String tenantColumn) {
         if (!tenantEnabled || sql == null || sql.isBlank()) return sql;
-        if (sql.toLowerCase().contains(tenantColumn.toLowerCase())) return sql;
+        String resolvedTenantColumn = normalizeTenantColumn(tenantColumn);
+        if (sql.toLowerCase().contains(resolvedTenantColumn.toLowerCase())) return sql;
         String upperSql = sql.toUpperCase();
         int closeParen = upperSql.indexOf(") VALUES");
         if (closeParen == -1) return sql;
         int lastClose = sql.lastIndexOf(")");
         if (lastClose <= closeParen) return sql;
         return sql.substring(0, closeParen)
-                + ", " + tenantColumn + ")"
+                + ", " + resolvedTenantColumn + ")"
                 + sql.substring(closeParen + 1, lastClose)
                 + ", :" + TENANT_PARAM_NAME + ")";
     }
@@ -91,7 +84,7 @@ public class JSqlDynamicSqlParser {
      * @param sql 原始 SQL（通常已经过 appendDeleteCondition 处理）
      * @return 拼接租户条件后的 SQL，不需要拼接则返回原 SQL
      */
-    public static String appendTenantCondition(String sql) {
+    public static String appendTenantCondition(String sql, boolean tenantEnabled, String tenantColumn) {
         if (!tenantEnabled || sql == null || sql.trim().isEmpty()) {
             return sql;
         }
@@ -100,33 +93,35 @@ public class JSqlDynamicSqlParser {
             return sql;
         }
 
-        return SqlParserSupport.rewriteSelectSql(sql, "租户条件", JSqlDynamicSqlParser::processTenantSelect, log);
+        String resolvedTenantColumn = normalizeTenantColumn(tenantColumn);
+        return SqlParserSupport.rewriteSelectSql(sql, "租户条件",
+                select -> processTenantSelect(select, resolvedTenantColumn), log);
     }
 
     /**
      * 处理 SELECT 语句，注入租户条件（复用 processSelect 框架，但走租户分支）
      */
-    private static void processTenantSelect(Select select) {
-        SqlParserSupport.processSelectTree(select, JSqlDynamicSqlParser::processTenantPlainSelect);
+    private static void processTenantSelect(Select select, String tenantColumn) {
+        SqlParserSupport.processSelectTree(select, plainSelect -> processTenantPlainSelect(plainSelect, tenantColumn));
     }
 
     /**
      * 处理简单 SELECT 语句的租户条件注入，逻辑与 processPlainSelect 对称
      */
-    private static void processTenantPlainSelect(PlainSelect plainSelect) {
+    private static void processTenantPlainSelect(PlainSelect plainSelect, String tenantColumn) {
         List<TableTenantCondition> whereConditions = new ArrayList<>();
         List<TableTenantCondition> joinConditions = new ArrayList<>();
 
         Expression existingWhere = plainSelect.getWhere();
 
-        SqlParserSupport.visitTables(plainSelect, JSqlDynamicSqlParser::processTenantSelect,
+        SqlParserSupport.visitTables(plainSelect, select -> processTenantSelect(select, tenantColumn),
                 (table, join) -> addTableTenantConditionByType(table, existingWhere,
                         join == null ? JoinType.FROM_TABLE : getJoinType(join), join,
-                        whereConditions, joinConditions));
+                        whereConditions, joinConditions, tenantColumn));
 
         // 注入 WHERE 条件
         if (!whereConditions.isEmpty()) {
-            Expression tenantConditions = buildTenantConditionsExpression(whereConditions);
+            Expression tenantConditions = buildTenantConditionsExpression(whereConditions, tenantColumn);
             Expression currentWhere = plainSelect.getWhere();
             plainSelect.setWhere(currentWhere != null
                     ? new AndExpression(currentWhere, tenantConditions)
@@ -135,17 +130,18 @@ public class JSqlDynamicSqlParser {
 
         // 注入 JOIN ON 条件
         for (TableTenantCondition condition : joinConditions) {
-            addTenantConditionToJoinOn(condition);
+            addTenantConditionToJoinOn(condition, tenantColumn);
         }
 
         // 递归处理子查询
-        SqlParserSupport.processNestedSelects(plainSelect, JSqlDynamicSqlParser::processTenantSelect);
+        SqlParserSupport.processNestedSelects(plainSelect, select -> processTenantSelect(select, tenantColumn));
     }
 
     private static void addTableTenantConditionByType(Table table, Expression existingWhere, JoinType joinType,
                                                        Join joinObject,
                                                        List<TableTenantCondition> whereConditions,
-                                                       List<TableTenantCondition> joinConditions) {
+                                                       List<TableTenantCondition> joinConditions,
+                                                       String tenantColumn) {
         String tableName = table.getName();
         String alias = table.getAlias() != null ? table.getAlias().getName() : null;
 
@@ -169,20 +165,20 @@ public class JSqlDynamicSqlParser {
                 (joinType == JoinType.LEFT_JOIN || joinType == JoinType.RIGHT_JOIN) ? "JOIN ON" : "WHERE");
     }
 
-    private static Expression buildTenantConditionsExpression(List<TableTenantCondition> conditions) {
+    private static Expression buildTenantConditionsExpression(List<TableTenantCondition> conditions, String tenantColumn) {
         Expression result = null;
         for (TableTenantCondition tc : conditions) {
-            Expression cond = createTenantConditionExpression(tc.alias != null ? tc.alias : tc.tableName);
+            Expression cond = createTenantConditionExpression(tc.alias != null ? tc.alias : tc.tableName, tenantColumn);
             result = (result == null) ? cond : new AndExpression(result, cond);
         }
         return result;
     }
 
-    private static void addTenantConditionToJoinOn(TableTenantCondition condition) {
+    private static void addTenantConditionToJoinOn(TableTenantCondition condition, String tenantColumn) {
         if (condition.joinObject == null) return;
 
         Expression tenantCond = createTenantConditionExpression(
-                condition.alias != null ? condition.alias : condition.tableName);
+                condition.alias != null ? condition.alias : condition.tableName, tenantColumn);
 
         Collection<Expression> onExpressions = condition.joinObject.getOnExpressions();
         if (onExpressions != null && !onExpressions.isEmpty()) {
@@ -207,7 +203,7 @@ public class JSqlDynamicSqlParser {
     /**
      * 创建租户条件表达式：tableRef.tenant_id = :myjpaTenantId
      */
-    private static Expression createTenantConditionExpression(String tableRef) {
+    private static Expression createTenantConditionExpression(String tableRef, String tenantColumn) {
         Column column = new Column();
         if (tableRef != null && !tableRef.trim().isEmpty()) {
             column.setTable(new Table(tableRef));
@@ -259,27 +255,30 @@ public class JSqlDynamicSqlParser {
      * @param sql 原始 SQL
      * @return 注入两类条件后的 SQL
      */
-    public static String appendConditions(String sql) {
+    public static String appendConditions(String sql, boolean tenantEnabled, String tenantColumn) {
         if (sql == null || sql.trim().isEmpty()) {
             return sql;
         }
-        return SqlParserSupport.rewriteSelectSql(sql, "合并条件", JSqlDynamicSqlParser::processUnifiedSelect, log);
+        String resolvedTenantColumn = normalizeTenantColumn(tenantColumn);
+        return SqlParserSupport.rewriteSelectSql(sql, "合并条件",
+                select -> processUnifiedSelect(select, tenantEnabled, resolvedTenantColumn), log);
     }
 
-    private static void processUnifiedSelect(Select select) {
-        SqlParserSupport.processSelectTree(select, JSqlDynamicSqlParser::processUnifiedPlainSelect);
+    private static void processUnifiedSelect(Select select, boolean tenantEnabled, String tenantColumn) {
+        SqlParserSupport.processSelectTree(select,
+                plainSelect -> processUnifiedPlainSelect(plainSelect, tenantEnabled, tenantColumn));
     }
 
-    private static void processUnifiedPlainSelect(PlainSelect plainSelect) {
+    private static void processUnifiedPlainSelect(PlainSelect plainSelect, boolean tenantEnabled, String tenantColumn) {
         List<UnifiedTableConditions> whereConditions = new ArrayList<>();
         List<UnifiedTableConditions> joinConditions = new ArrayList<>();
 
         Expression existingWhere = plainSelect.getWhere();
 
-        SqlParserSupport.visitTables(plainSelect, JSqlDynamicSqlParser::processUnifiedSelect,
+        SqlParserSupport.visitTables(plainSelect, select -> processUnifiedSelect(select, tenantEnabled, tenantColumn),
                 (table, join) -> collectUnifiedConditions(table, existingWhere,
                         join == null ? JoinType.FROM_TABLE : getJoinType(join), join,
-                        whereConditions, joinConditions));
+                        whereConditions, joinConditions, tenantEnabled, tenantColumn));
 
         // 注入 WHERE 条件
         if (!whereConditions.isEmpty()) {
@@ -296,7 +295,8 @@ public class JSqlDynamicSqlParser {
         }
 
         // 递归处理子查询
-        SqlParserSupport.processNestedSelects(plainSelect, JSqlDynamicSqlParser::processUnifiedSelect);
+        SqlParserSupport.processNestedSelects(plainSelect,
+                select -> processUnifiedSelect(select, tenantEnabled, tenantColumn));
     }
 
     /**
@@ -305,7 +305,9 @@ public class JSqlDynamicSqlParser {
     private static void collectUnifiedConditions(Table table, Expression existingWhere,
                                                   JoinType joinType, Join joinObject,
                                                   List<UnifiedTableConditions> whereConditions,
-                                                  List<UnifiedTableConditions> joinConditions) {
+                                                  List<UnifiedTableConditions> joinConditions,
+                                                  boolean tenantEnabled,
+                                                  String tenantColumn) {
         String tableName = table.getName();
         String alias = table.getAlias() != null ? table.getAlias().getName() : null;
         String tableRef = alias != null ? alias : tableName;
@@ -328,7 +330,7 @@ public class JSqlDynamicSqlParser {
         // 2. 租户条件
         if (tenantEnabled && TableCacheManager.hasTenantColumn(tableName)
                 && !isDeleteConditionExists(existingWhere, tenantColumn, alias, tableName)) {
-            exprs.add(createTenantConditionExpression(tableRef));
+            exprs.add(createTenantConditionExpression(tableRef, tenantColumn));
         }
 
         if (exprs.isEmpty()) return;
@@ -744,6 +746,10 @@ public class JSqlDynamicSqlParser {
             this.joinType = joinType;
             this.joinObject = joinObject;
         }
+    }
+
+    private static String normalizeTenantColumn(String tenantColumn) {
+        return (tenantColumn == null || tenantColumn.isBlank()) ? "tenant_id" : tenantColumn.trim();
     }
 
 }

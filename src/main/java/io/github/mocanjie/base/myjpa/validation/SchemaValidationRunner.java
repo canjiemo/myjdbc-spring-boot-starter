@@ -1,6 +1,7 @@
 package io.github.mocanjie.base.myjpa.validation;
 
 import io.github.mocanjie.base.myjpa.cache.TableCacheManager;
+import io.github.mocanjie.base.myjpa.configuration.MyJpaProperties;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.InitializingBean;
@@ -20,9 +21,14 @@ import org.springframework.stereotype.Component;
 public class SchemaValidationRunner implements InitializingBean, Ordered {
     
     private static final Logger log = LoggerFactory.getLogger(SchemaValidationRunner.class);
+    private final boolean failOnValidationError;
     
     @Autowired(required = false)
     private DatabaseSchemaValidator schemaValidator;
+
+    public SchemaValidationRunner(MyJpaProperties properties) {
+        this.failOnValidationError = properties != null && properties.isFailOnValidationError();
+    }
     
     @Override
     public void afterPropertiesSet() throws Exception {
@@ -47,9 +53,8 @@ public class SchemaValidationRunner implements InitializingBean, Ordered {
                 
                 // 可选：根据配置决定是否抛出异常阻止启动
                 // 默认情况下仅记录错误，不阻止启动
-                String failOnError = System.getProperty("myjpa.fail-on-validation-error", "false");
-                if ("true".equalsIgnoreCase(failOnError)) {
-                    throw new IllegalStateException("数据库模式验证失败，应用启动终止。可通过 -Dmyjpa.fail-on-validation-error=false 禁用此行为");
+                if (failOnValidationError) {
+                    throw new IllegalStateException("数据库模式验证失败，应用启动终止。可通过 myjpa.fail-on-validation-error=false 或 -Dmyjpa.fail-on-validation-error=false 禁用此行为");
                 }
             } else {
                 log.info("数据库模式验证通过 ✓");
@@ -59,8 +64,7 @@ public class SchemaValidationRunner implements InitializingBean, Ordered {
             log.error("执行数据库模式验证时发生异常", e);
             
             // 验证异常时的处理策略
-            String failOnError = System.getProperty("myjpa.fail-on-validation-error", "false");
-            if ("true".equalsIgnoreCase(failOnError)) {
+            if (failOnValidationError) {
                 throw e;
             }
         }
