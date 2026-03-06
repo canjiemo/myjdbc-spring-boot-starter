@@ -179,7 +179,7 @@ public class DatabaseSchemaValidator implements Ordered {
                     return checkTableExistsSQLServer(tableName);
                 case "postgresql":
                 case "kingbasees":
-                    return checkTableExistsPostgreSQL(tableName);
+                    return checkTableExistsPostgresSQL(tableName);
                 default:
                     return checkTableExistsGeneric(tableName);
             }
@@ -304,9 +304,10 @@ public class DatabaseSchemaValidator implements Ordered {
                 );
             case "postgresql":
             case "kingbasees":
+                String currentSchema = resolveCurrentSchema();
                 return new QuerySpec(
-                    "SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_CATALOG = current_database() AND TABLE_SCHEMA = current_schema() AND TABLE_NAME = ?",
-                    new Object[]{tableName}
+                    "SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ?",
+                    new Object[]{currentSchema, tableName}
                 );
             default:
                 return null;
@@ -362,11 +363,12 @@ public class DatabaseSchemaValidator implements Ordered {
         }
     }
     
-    private boolean checkTableExistsPostgreSQL(String tableName) {
+    private boolean checkTableExistsPostgresSQL(String tableName) {
         try {
+            String currentSchema = resolveCurrentSchema();
             Integer count = jdbcTemplate.queryForObject(
-                "SELECT COUNT(*) FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_CATALOG = current_database() AND TABLE_SCHEMA = current_schema() AND TABLE_NAME = ?",
-                Integer.class, tableName.toLowerCase());
+                "SELECT COUNT(*) FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ?",
+                Integer.class, currentSchema, tableName.toLowerCase());
             return count != null && count > 0;
         } catch (Exception e) {
             return false;
@@ -435,6 +437,16 @@ public class DatabaseSchemaValidator implements Ordered {
     }
 
     private record QuerySpec(String sql, Object[] args) {}
+
+    private String resolveCurrentSchema() {
+        try (Connection conn = dataSource.getConnection()) {
+            String schema = conn.getSchema();
+            return (schema == null || schema.isBlank()) ? "public" : schema.toLowerCase();
+        } catch (SQLException e) {
+            log.debug("获取当前 schema 失败，回退到 public: {}", e.getMessage());
+            return "public";
+        }
+    }
 
     /**
      * 从缓存中获取主键字段名
