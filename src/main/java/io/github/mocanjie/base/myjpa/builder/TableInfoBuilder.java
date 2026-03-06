@@ -91,7 +91,7 @@ public class TableInfoBuilder implements BeanPostProcessor, Ordered {
      * 最后fallback到常见的业务包
      */
     private List<String> getScanPackages() {
-        List<String> packages = new ArrayList<>();
+        Set<String> packages = new LinkedHashSet<>();
 
         try {
             String mainClassName = findMainClass();
@@ -102,11 +102,13 @@ public class TableInfoBuilder implements BeanPostProcessor, Ordered {
                 org.springframework.boot.autoconfigure.SpringBootApplication springBootApp =
                     mainClass.getAnnotation(org.springframework.boot.autoconfigure.SpringBootApplication.class);
 
-                if (springBootApp != null && springBootApp.scanBasePackages().length > 0) {
-                    // 如果配置了scanBasePackages，添加所有配置的包
-                    packages.addAll(Arrays.asList(springBootApp.scanBasePackages()));
-                    log.info("从@SpringBootApplication.scanBasePackages获取包路径: {}", packages);
-                    return packages;
+                if (springBootApp != null) {
+                    addConfiguredPackages(packages, springBootApp.scanBasePackages());
+                    addConfiguredPackageClasses(packages, springBootApp.scanBasePackageClasses());
+                    if (!packages.isEmpty()) {
+                        log.info("从@SpringBootApplication扫描配置获取包路径: {}", packages);
+                        return new ArrayList<>(packages);
+                    }
                 }
 
                 // 如果没有配置scanBasePackages，使用主类所在的包
@@ -115,7 +117,7 @@ public class TableInfoBuilder implements BeanPostProcessor, Ordered {
                     String packageName = mainClassName.substring(0, lastDotIndex);
                     packages.add(packageName);
                     log.info("从主类包路径获取: {}", packageName);
-                    return packages;
+                    return new ArrayList<>(packages);
                 }
             }
         } catch (Exception e) {
@@ -123,9 +125,35 @@ public class TableInfoBuilder implements BeanPostProcessor, Ordered {
         }
 
         // fallback: 使用常见的业务包前缀
-        packages.add("com");
+        packages.addAll(Arrays.asList("com", "cn", "org", "io"));
         log.info("使用fallback包路径: {}", packages);
-        return packages;
+        return new ArrayList<>(packages);
+    }
+
+    private void addConfiguredPackages(Set<String> packages, String[] scanBasePackages) {
+        if (scanBasePackages == null) {
+            return;
+        }
+        for (String basePackage : scanBasePackages) {
+            if (basePackage != null && !basePackage.isBlank()) {
+                packages.add(basePackage.trim());
+            }
+        }
+    }
+
+    private void addConfiguredPackageClasses(Set<String> packages, Class<?>[] scanBasePackageClasses) {
+        if (scanBasePackageClasses == null) {
+            return;
+        }
+        for (Class<?> packageClass : scanBasePackageClasses) {
+            if (packageClass == null || packageClass.getPackage() == null) {
+                continue;
+            }
+            String packageName = packageClass.getPackage().getName();
+            if (!packageName.isBlank()) {
+                packages.add(packageName);
+            }
+        }
     }
 
     /**
@@ -150,20 +178,27 @@ public class TableInfoBuilder implements BeanPostProcessor, Ordered {
      * 查找Spring Boot主类
      */
     private String findMainClass() {
-        // 方法1：通过堆栈跟踪查找main方法
-        StackTraceElement[] stackTrace = Thread.currentThread().getStackTrace();
-        for (StackTraceElement element : stackTrace) {
-            if ("main".equals(element.getMethodName())) {
-                return element.getClassName();
-            }
-        }
-
-        // 方法2：通过系统属性查找
+        // 方法1：优先使用 JVM 启动命令推导主类，避免测试/容器环境下误识别 launcher main
         String mainClass = System.getProperty("sun.java.command");
         if (mainClass != null && mainClass.contains(".")) {
             String[] parts = mainClass.split("\\s+");
             if (parts.length > 0 && parts[0].contains(".")) {
-                return parts[0];
+                try {
+                    Class<?> candidate = Class.forName(parts[0]);
+                    if (candidate.getAnnotation(org.springframework.boot.autoconfigure.SpringBootApplication.class) != null) {
+                        return parts[0];
+                    }
+                } catch (ClassNotFoundException ignored) {
+                    // ignore and fallback to stack trace detection
+                }
+            }
+        }
+
+        // 方法2：通过堆栈跟踪查找main方法
+        StackTraceElement[] stackTrace = Thread.currentThread().getStackTrace();
+        for (StackTraceElement element : stackTrace) {
+            if ("main".equals(element.getMethodName())) {
+                return element.getClassName();
             }
         }
 

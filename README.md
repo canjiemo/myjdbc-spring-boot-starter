@@ -122,7 +122,7 @@ WHERE u.delete_flag = 0
 
 ```xml
 <dependency>
-    <groupId>io.github.mocanjie</groupId>
+    <groupId>io.github.canjiemo</groupId>
     <artifactId>myjpa-spring-boot-starter</artifactId>
     <version>1.0-jdk21</version>
 </dependency>

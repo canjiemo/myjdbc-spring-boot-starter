@@ -326,11 +326,15 @@ public class BaseDaoImpl implements IBaseDao {
 	}
 
 	private <PO extends MyTableEntity> int updatePO(PO po, boolean ignoreNull, @Nullable String... forceUpdateFields) {
-		TableInfo tableInfo = TableInfoBuilder.getTableInfo(po.getClass());
-		String sql = SqlParser.getUpdateSql(tableInfo, po, ignoreNull, forceUpdateFields);
-		SqlParameterSource paramSource = new BeanPropertySqlParameterSource(po);
-		var r = applyWriteConditions(sql, paramSource, tableInfo.getTableName());
-		return executeWithTiming(r.sql(), () -> namedParameterJdbcTemplate.update(r.sql(), r.sps()));
+		try {
+			TableInfo tableInfo = TableInfoBuilder.getTableInfo(po.getClass());
+			String sql = SqlParser.getUpdateSql(tableInfo, po, ignoreNull, forceUpdateFields);
+			SqlParameterSource paramSource = new BeanPropertySqlParameterSource(po);
+			var r = applyWriteConditions(sql, paramSource, tableInfo.getTableName());
+			return executeWithTiming(r.sql(), () -> namedParameterJdbcTemplate.update(r.sql(), r.sps()));
+		} catch (Exception e) {
+			throw businessError("updatePO", e, MyJpaErrorCode.DAO_ERROR.userMessage(), po != null ? po.getClass().getName() : "null");
+		}
 	}
 
 	@Override

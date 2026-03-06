@@ -80,7 +80,7 @@ public class BaseServiceImpl implements IBaseService {
 
 	@Override
 	public <PO extends MyTableEntity> PO queryById(Long id, Class<PO> clazz) {
-		return baseDao.queryById(String.valueOf(id), clazz);
+		return baseDao.queryById(id, clazz);
 	}
 
 	@Override

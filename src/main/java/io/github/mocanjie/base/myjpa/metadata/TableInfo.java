@@ -11,6 +11,7 @@ import org.springframework.beans.BeanUtils;
 
 import java.beans.PropertyDescriptor;
 import java.lang.reflect.Field;
+import java.lang.reflect.Method;
 import java.util.List;
 import java.util.Optional;
 
@@ -39,27 +40,72 @@ public class TableInfo {
 
     public void setPkValue(Object obj, Object value){
         try {
-            PropertyDescriptor propertyDescriptor = BeanUtils.getPropertyDescriptor(obj.getClass(), this.pkField.getName());
-            propertyDescriptor.getWriteMethod().invoke(obj,value);
+            PropertyDescriptor propertyDescriptor = getPkPropertyDescriptor(obj);
+            Method writeMethod = propertyDescriptor.getWriteMethod();
+            if (writeMethod == null) {
+                throw pkConfigError("写入主键", obj, null);
+            }
+            writeMethod.invoke(obj, value);
         }catch (Exception e){
+            if (e instanceof BusinessException businessException) {
+                throw businessException;
+            }
+            throw pkConfigError("写入主键", obj, e);
         }
     }
 
     public void setPkValue(Object obj){
         try {
             Object value = ConvertUtils.convert(IdGen.get().nextId(), this.pkField.getType());
-            PropertyDescriptor propertyDescriptor = BeanUtils.getPropertyDescriptor(obj.getClass(), this.pkField.getName());
-            propertyDescriptor.getWriteMethod().invoke(obj,value);
+            PropertyDescriptor propertyDescriptor = getPkPropertyDescriptor(obj);
+            Method writeMethod = propertyDescriptor.getWriteMethod();
+            if (writeMethod == null) {
+                throw pkConfigError("生成并写入主键", obj, null);
+            }
+            writeMethod.invoke(obj, value);
         }catch (Exception e){
+            if (e instanceof BusinessException businessException) {
+                throw businessException;
+            }
+            throw pkConfigError("生成并写入主键", obj, e);
         }
     }
 
     public Object getPkValue(Object obj){
         try {
-            PropertyDescriptor propertyDescriptor = BeanUtils.getPropertyDescriptor(obj.getClass(), this.pkField.getName());
-            return propertyDescriptor.getReadMethod().invoke(obj);
+            PropertyDescriptor propertyDescriptor = getPkPropertyDescriptor(obj);
+            Method readMethod = propertyDescriptor.getReadMethod();
+            if (readMethod == null) {
+                throw pkConfigError("读取主键", obj, null);
+            }
+            return readMethod.invoke(obj);
         }catch (Exception e){
-            return null;
+            if (e instanceof BusinessException businessException) {
+                throw businessException;
+            }
+            throw pkConfigError("读取主键", obj, e);
         }
+    }
+
+    private PropertyDescriptor getPkPropertyDescriptor(Object obj) {
+        if (obj == null || this.pkField == null) {
+            throw pkConfigError("解析主键属性", obj, null);
+        }
+        PropertyDescriptor propertyDescriptor = BeanUtils.getPropertyDescriptor(obj.getClass(), this.pkField.getName());
+        if (propertyDescriptor == null) {
+            throw pkConfigError("解析主键属性", obj, null);
+        }
+        return propertyDescriptor;
+    }
+
+    private BusinessException pkConfigError(String action, Object obj, Exception e) {
+        String className = obj == null ? "null" : obj.getClass().getName();
+        String pkName = this.pkField == null ? "null" : this.pkField.getName();
+        if (e == null) {
+            log.error("实体主键访问失败: action={}, class={}, pkField={}", action, className, pkName);
+        } else {
+            log.error("实体主键访问失败: action={}, class={}, pkField={}", action, className, pkName, e);
+        }
+        return new BusinessException(MyJpaErrorCode.CONFIG_ERROR.userMessage());
     }
 }

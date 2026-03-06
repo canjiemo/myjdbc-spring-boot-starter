@@ -29,9 +29,9 @@ public class DatabaseSchemaValidator implements Ordered {
     private final DataSource dataSource;
     private String databaseType;
 
-    // 添加验证执行标记，防止重复执行
-    private static volatile boolean validationExecuted = false;
-    private static final Object validationLock = new Object();
+    // 实例级执行标记，避免同 JVM 多个 ApplicationContext 之间相互污染
+    private volatile boolean validationExecuted = false;
+    private final Object validationLock = new Object();
     
     public DatabaseSchemaValidator(JdbcTemplate jdbcTemplate, DataSource dataSource) {
         this.jdbcTemplate = jdbcTemplate;
@@ -224,8 +224,10 @@ public class DatabaseSchemaValidator implements Ordered {
 
         try (Connection conn = dataSource.getConnection()) {
             DatabaseMetaData metaData = conn.getMetaData();
+            String catalog = conn.getCatalog();
+            String schema = conn.getSchema();
             for (String tableNameVariant : tableNameVariants) {
-                try (ResultSet rs = metaData.getColumns(null, null, tableNameVariant, null)) {
+                try (ResultSet rs = metaData.getColumns(catalog, schema, tableNameVariant, null)) {
 
                     while (rs.next()) {
                         columns.add(rs.getString("COLUMN_NAME"));
@@ -254,13 +256,13 @@ public class DatabaseSchemaValidator implements Ordered {
 
         try {
             String targetTableName = normalizeTableNameByDatabase(tableName);
-            String sql = buildColumnQuerySql();
-            if (sql == null) {
+            QuerySpec querySpec = buildColumnQuery(targetTableName);
+            if (querySpec == null) {
                 return columns;
             }
             log.debug("执行SQL查询获取列信息, dbType={}, table={}", databaseType, targetTableName);
 
-            List<String> queryResult = jdbcTemplate.queryForList(sql, String.class, targetTableName);
+            List<String> queryResult = jdbcTemplate.queryForList(querySpec.sql(), String.class, querySpec.args());
             for (String columnName : queryResult) {
                 if (columnName != null && !columnName.trim().isEmpty()) {
                     columns.add(columnName);
@@ -280,17 +282,29 @@ public class DatabaseSchemaValidator implements Ordered {
     /**
      * 构建查询表列的SQL语句
      */
-    private String buildColumnQuerySql() {
+    private QuerySpec buildColumnQuery(String tableName) {
         switch (databaseType.toLowerCase()) {
             case "mysql":
-                return "SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = ?";
+                return new QuerySpec(
+                    "SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ?",
+                    new Object[]{tableName}
+                );
             case "oracle":
-                return "SELECT COLUMN_NAME FROM USER_TAB_COLUMNS WHERE TABLE_NAME = ?";
+                return new QuerySpec(
+                    "SELECT COLUMN_NAME FROM USER_TAB_COLUMNS WHERE TABLE_NAME = ?",
+                    new Object[]{tableName}
+                );
             case "sqlserver":
-                return "SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = ?";
+                return new QuerySpec(
+                    "SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_CATALOG = DB_NAME() AND TABLE_SCHEMA = SCHEMA_NAME() AND TABLE_NAME = ?",
+                    new Object[]{tableName}
+                );
             case "postgresql":
             case "kingbasees":
-                return "SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = ?";
+                return new QuerySpec(
+                    "SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_CATALOG = current_database() AND TABLE_SCHEMA = current_schema() AND TABLE_NAME = ?",
+                    new Object[]{tableName}
+                );
             default:
                 return null;
         }
@@ -312,7 +326,7 @@ public class DatabaseSchemaValidator implements Ordered {
     private boolean checkTableExistsMySQL(String tableName) {
         try {
             Integer count = jdbcTemplate.queryForObject(
-                "SELECT COUNT(*) FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = ?", 
+                "SELECT COUNT(*) FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ?",
                 Integer.class, tableName);
             return count != null && count > 0;
         } catch (Exception e) {
@@ -334,7 +348,7 @@ public class DatabaseSchemaValidator implements Ordered {
     private boolean checkTableExistsSQLServer(String tableName) {
         try {
             Integer count = jdbcTemplate.queryForObject(
-                "SELECT COUNT(*) FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = ?", 
+                "SELECT COUNT(*) FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_CATALOG = DB_NAME() AND TABLE_SCHEMA = SCHEMA_NAME() AND TABLE_NAME = ?",
                 Integer.class, tableName);
             return count != null && count > 0;
         } catch (Exception e) {
@@ -345,7 +359,7 @@ public class DatabaseSchemaValidator implements Ordered {
     private boolean checkTableExistsPostgreSQL(String tableName) {
         try {
             Integer count = jdbcTemplate.queryForObject(
-                "SELECT COUNT(*) FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = ?", 
+                "SELECT COUNT(*) FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_CATALOG = current_database() AND TABLE_SCHEMA = current_schema() AND TABLE_NAME = ?",
                 Integer.class, tableName.toLowerCase());
             return count != null && count > 0;
         } catch (Exception e) {
@@ -357,8 +371,10 @@ public class DatabaseSchemaValidator implements Ordered {
         String[] tableNameVariants = {tableName, tableName.toUpperCase(), tableName.toLowerCase()};
         try (Connection conn = dataSource.getConnection()) {
             DatabaseMetaData metaData = conn.getMetaData();
+            String catalog = conn.getCatalog();
+            String schema = conn.getSchema();
             for (String tableNameVariant : tableNameVariants) {
-                try (ResultSet rs = metaData.getTables(null, null, tableNameVariant, new String[]{"TABLE"})) {
+                try (ResultSet rs = metaData.getTables(catalog, schema, tableNameVariant, new String[]{"TABLE"})) {
                     if (rs.next()) {
                         return true;
                     }
@@ -404,6 +420,8 @@ public class DatabaseSchemaValidator implements Ordered {
     private Set<String> getAllCachedTableNames() {
         return TableCacheManager.getAllTableNames();
     }
+
+    private record QuerySpec(String sql, Object[] args) {}
     
     /**
      * 从缓存中获取主键字段名
