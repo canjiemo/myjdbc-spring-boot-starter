@@ -5,8 +5,11 @@ import io.github.canjiemo.base.myjdbc.metadata.TableInfo;
 import io.github.canjiemo.base.myjdbc.scanmarker.ScanMarker;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.support.DefaultListableBeanFactory;
+import org.springframework.boot.autoconfigure.AutoConfigurationPackages;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 
+import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.util.List;
 
@@ -14,6 +17,23 @@ import static org.junit.jupiter.api.Assertions.*;
 
 @DisplayName("TableInfoBuilder 包扫描推导测试")
 class TableInfoBuilderTest {
+
+    @Test
+    @DisplayName("AutoConfigurationPackages 应优先参与扫描路径推导")
+    void getScanPackagesShouldPreferAutoConfigurationPackages() throws Exception {
+        DefaultListableBeanFactory beanFactory = new DefaultListableBeanFactory();
+        AutoConfigurationPackages.register(beanFactory,
+                "com.example.demo",
+                "io.github.canjiemo.base.myjdbc.scanmarker");
+
+        TableInfoBuilder builder = new TableInfoBuilder();
+        setBeanFactory(builder, beanFactory);
+
+        List<String> packages = invokeGetScanPackages(builder);
+
+        assertTrue(packages.contains("com.example.demo"));
+        assertTrue(packages.contains("io.github.canjiemo.base.myjdbc.scanmarker"));
+    }
 
     @Test
     @DisplayName("scanBasePackageClasses 配置应参与扫描路径推导")
@@ -24,13 +44,28 @@ class TableInfoBuilderTest {
 
         try {
             TableInfoBuilder builder = new TableInfoBuilder();
-            Method method = TableInfoBuilder.class.getDeclaredMethod("getScanPackages");
-            method.setAccessible(true);
-
-            @SuppressWarnings("unchecked")
-            List<String> packages = (List<String>) method.invoke(builder);
+            List<String> packages = invokeGetScanPackages(builder);
 
             assertTrue(packages.contains("io.github.canjiemo.base.myjdbc.scanmarker"));
+        } finally {
+            if (original == null) {
+                System.clearProperty(key);
+            } else {
+                System.setProperty(key, original);
+            }
+        }
+    }
+
+    @Test
+    @DisplayName("缺少 Boot 上下文时不应兜底扫描全局业务包")
+    void getScanPackagesShouldStayEmptyWithoutBootHints() throws Exception {
+        String key = "sun.java.command";
+        String original = System.getProperty(key);
+        System.setProperty(key, "org.apache.maven.surefire.booter.ForkedBooter");
+
+        try {
+            TableInfoBuilder builder = new TableInfoBuilder();
+            assertTrue(invokeGetScanPackages(builder).isEmpty());
         } finally {
             if (original == null) {
                 System.clearProperty(key);
@@ -74,5 +109,18 @@ class TableInfoBuilderTest {
 
     @SpringBootApplication(scanBasePackageClasses = InheritedPkUser.class)
     static class InheritedPkApplication {
+    }
+
+    @SuppressWarnings("unchecked")
+    private static List<String> invokeGetScanPackages(TableInfoBuilder builder) throws Exception {
+        Method method = TableInfoBuilder.class.getDeclaredMethod("getScanPackages");
+        method.setAccessible(true);
+        return (List<String>) method.invoke(builder);
+    }
+
+    private static void setBeanFactory(TableInfoBuilder builder, DefaultListableBeanFactory beanFactory) throws Exception {
+        Field field = TableInfoBuilder.class.getDeclaredField("beanFactory");
+        field.setAccessible(true);
+        field.set(builder, beanFactory);
     }
 }

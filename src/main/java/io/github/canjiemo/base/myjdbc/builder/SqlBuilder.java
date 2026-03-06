@@ -109,6 +109,7 @@ public class SqlBuilder {
 			case ORACLE     -> buildOraclePagerSql(sql, pager);
 			case SQL_SERVER -> buildSqlServerPagerSql(sql, pager);
 			case POSTGRESQL -> buildPgsqlPagerSql(sql, pager);
+			// KingbaseES 在当前项目约束下沿用 MySQL 风格分页，避免与现有集成行为不兼容。
 			default         -> buildMysqlPagerSql(sql, pager); // MYSQL + KINGBASE_ES
 		};
 	}

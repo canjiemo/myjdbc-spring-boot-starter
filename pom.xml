@@ -52,6 +52,7 @@
         <lombok.version>1.18.38</lombok.version>
         <commons-lang3.version>3.12.0</commons-lang3.version>
         <commons-beanutils.version>1.9.4</commons-beanutils.version>
+        <jsr305.version>3.0.2</jsr305.version>
         <slf4j.version>2.0.9</slf4j.version>
 
     </properties>
@@ -110,6 +111,14 @@
             <groupId>commons-beanutils</groupId>
             <artifactId>commons-beanutils</artifactId>
             <version>${commons-beanutils.version}</version>
+        </dependency>
+
+        <!-- 仅用于消除编译期 javax.annotation.meta.When 缺失告警，不向使用方强制传递 -->
+        <dependency>
+            <groupId>com.google.code.findbugs</groupId>
+            <artifactId>jsr305</artifactId>
+            <version>${jsr305.version}</version>
+            <optional>true</optional>
         </dependency>
 
         <!-- Micrometer（可选：仅当应用包含 micrometer-core 时自动注册指标） -->

@@ -1,2 +1,3 @@
-io.github.canjiemo.base.myjdbc.configuration.MyJdbcAutoConfiguration
 io.github.canjiemo.base.myjdbc.configuration.MyJdbcTemplateAutoConfiguration
+io.github.canjiemo.base.myjdbc.configuration.MyJdbcAutoConfiguration
+io.github.canjiemo.base.myjdbc.configuration.MyJdbcMetricsAutoConfiguration

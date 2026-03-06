@@ -8,8 +8,12 @@ import io.github.canjiemo.base.myjdbc.utils.MyReflectionUtils;
 import io.github.canjiemo.mycommon.exception.BusinessException;
 import jakarta.annotation.PostConstruct;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.BeanFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.config.BeanDefinition;
 import org.springframework.beans.factory.config.BeanPostProcessor;
+import org.springframework.boot.autoconfigure.AutoConfigurationPackages;
+import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.context.annotation.ClassPathScanningCandidateComponentProvider;
 import org.springframework.core.Ordered;
 import org.springframework.core.type.filter.AnnotationTypeFilter;
@@ -24,6 +28,9 @@ public class TableInfoBuilder implements BeanPostProcessor, Ordered {
     private static final Map<Class<?>, TableInfo> tableInfoMap = new ConcurrentHashMap<>();
     private static final Set<String> missingTableInfoLogged = java.util.concurrent.ConcurrentHashMap.newKeySet();
 
+    @Autowired(required = false)
+    private BeanFactory beanFactory;
+
     @PostConstruct
     private void init() {
         log.info("初始化@MyTable信息...");
@@ -35,6 +42,11 @@ public class TableInfoBuilder implements BeanPostProcessor, Ordered {
         // 获取要扫描的包路径列表
         List<String> scanPackages = getScanPackages();
         log.info("准备扫描的包路径: {}", scanPackages);
+        if (scanPackages.isEmpty()) {
+            log.warn("未能推导到任何实体扫描包，跳过 @MyTable 初始化");
+            initTableCacheManager(scanPackages);
+            return;
+        }
 
         // 使用Spring的类路径扫描器
         ClassPathScanningCandidateComponentProvider scanner =
@@ -82,17 +94,23 @@ public class TableInfoBuilder implements BeanPostProcessor, Ordered {
 
         // TableInfoBuilder初始化完成后立即初始化TableCacheManager
         // 确保缓存在任何SQL执行之前就已经准备好
-        initTableCacheManager();
+        initTableCacheManager(scanPackages);
     }
     
     /**
      * 获取要扫描的包路径列表
-     * 优先从@SpringBootApplication的scanBasePackages读取（支持多个包）
-     * 如果没有配置则使用主类所在包
-     * 最后fallback到常见的业务包
+     * 优先从 Spring Boot 官方 AutoConfigurationPackages 读取；
+     * 若当前不是标准 Boot 上下文，则回退到 @SpringBootApplication 的扫描配置或主类包。
+     * 均无法推导时返回空，避免兜底全局扫描带来启动性能和误扫描风险。
      */
     private List<String> getScanPackages() {
         Set<String> packages = new LinkedHashSet<>();
+
+        addAutoConfigurationPackages(packages);
+        if (!packages.isEmpty()) {
+            log.info("从AutoConfigurationPackages获取包路径: {}", packages);
+            return new ArrayList<>(packages);
+        }
 
         try {
             String mainClassName = findMainClass();
@@ -100,8 +118,7 @@ public class TableInfoBuilder implements BeanPostProcessor, Ordered {
                 Class<?> mainClass = Class.forName(mainClassName);
 
                 // 检查@SpringBootApplication注解
-                org.springframework.boot.autoconfigure.SpringBootApplication springBootApp =
-                    mainClass.getAnnotation(org.springframework.boot.autoconfigure.SpringBootApplication.class);
+                SpringBootApplication springBootApp = mainClass.getAnnotation(SpringBootApplication.class);
 
                 if (springBootApp != null) {
                     addConfiguredPackages(packages, springBootApp.scanBasePackages());
@@ -110,25 +127,27 @@ public class TableInfoBuilder implements BeanPostProcessor, Ordered {
                         log.info("从@SpringBootApplication扫描配置获取包路径: {}", packages);
                         return new ArrayList<>(packages);
                     }
-                }
-
-                // 如果没有配置scanBasePackages，使用主类所在的包
-                int lastDotIndex = mainClassName.lastIndexOf('.');
-                if (lastDotIndex > 0) {
-                    String packageName = mainClassName.substring(0, lastDotIndex);
-                    packages.add(packageName);
-                    log.info("从主类包路径获取: {}", packageName);
-                    return new ArrayList<>(packages);
+                    Package mainPackage = mainClass.getPackage();
+                    if (mainPackage != null && !mainPackage.getName().isBlank()) {
+                        packages.add(mainPackage.getName());
+                        log.info("从主类包路径获取: {}", mainPackage.getName());
+                        return new ArrayList<>(packages);
+                    }
                 }
             }
         } catch (Exception e) {
             log.warn("无法从@SpringBootApplication获取包路径: {}", e.getMessage());
         }
 
-        // fallback: 使用常见的业务包前缀
-        packages.addAll(Arrays.asList("com", "cn", "org", "io"));
-        log.info("使用fallback包路径: {}", packages);
-        return new ArrayList<>(packages);
+        log.warn("未找到 Spring Boot 自动配置包或主应用类，保持扫描包为空，避免兜底全局扫描");
+        return List.of();
+    }
+
+    private void addAutoConfigurationPackages(Set<String> packages) {
+        if (beanFactory == null || !AutoConfigurationPackages.has(beanFactory)) {
+            return;
+        }
+        packages.addAll(AutoConfigurationPackages.get(beanFactory));
     }
 
     private void addConfiguredPackages(Set<String> packages, String[] scanBasePackages) {
@@ -161,17 +180,19 @@ public class TableInfoBuilder implements BeanPostProcessor, Ordered {
      * 在TableInfoBuilder初始化完成后立即初始化TableCacheManager
      * 这样可以确保缓存优先于SQL执行进行初始化
      */
-    private void initTableCacheManager() {
+    private void initTableCacheManager(List<String> scanPackages) {
         try {
-            List<String> scanPackages = getScanPackages();
+            if (scanPackages.isEmpty()) {
+                TableCacheManager.clearCache();
+                log.warn("TableCacheManager 未初始化任何扫描包，缓存保持为空");
+                return;
+            }
             TableCacheManager.initCache(scanPackages.toArray(new String[0]));
 
             log.info("TableCacheManager已在TableInfoBuilder后初始化完成，智能扫描包: {}", scanPackages);
             log.info("缓存统计: {}", TableCacheManager.getCacheStats());
         } catch (Exception e) {
-            log.warn("初始化TableCacheManager时发生异常，使用fallback扫描: {}", e.getMessage());
-            // fallback: 如果无法推导包路径，使用常见的业务包前缀
-            fallbackScan();
+            log.error("初始化TableCacheManager时发生异常", e);
         }
     }
 
@@ -179,23 +200,22 @@ public class TableInfoBuilder implements BeanPostProcessor, Ordered {
      * 查找Spring Boot主类
      */
     private String findMainClass() {
-        // 方法1：优先使用 JVM 启动命令推导主类，避免测试/容器环境下误识别 launcher main
-        String mainClass = System.getProperty("sun.java.command");
-        if (mainClass != null && mainClass.contains(".")) {
-            String[] parts = mainClass.split("\\s+");
-            if (parts.length > 0 && parts[0].contains(".")) {
-                try {
-                    Class<?> candidate = Class.forName(parts[0]);
-                    if (candidate.getAnnotation(org.springframework.boot.autoconfigure.SpringBootApplication.class) != null) {
-                        return parts[0];
-                    }
-                } catch (ClassNotFoundException ignored) {
-                    // ignore and fallback to stack trace detection
+        // 优先使用 JVM 启动命令推导主类，避免测试/容器环境下误识别 launcher main
+        String command = System.getProperty("sun.java.command");
+        if (command != null) {
+            String[] parts = command.split("\\s+");
+            if (parts.length > 0) {
+                String candidate = parts[0];
+                if (!candidate.endsWith(".jar")
+                        && !candidate.contains("/")
+                        && !candidate.contains("\\")
+                        && candidate.contains(".")) {
+                    return candidate;
                 }
             }
         }
 
-        // 方法2：通过堆栈跟踪查找main方法
+        // 退化到堆栈跟踪查找 main 方法
         StackTraceElement[] stackTrace = Thread.currentThread().getStackTrace();
         for (StackTraceElement element : stackTrace) {
             if ("main".equals(element.getMethodName())) {
@@ -205,19 +225,6 @@ public class TableInfoBuilder implements BeanPostProcessor, Ordered {
 
         return null;
     }
-    
-    /**
-     * fallback扫描策略
-     */
-    private void fallbackScan() {
-        try {
-            TableCacheManager.initCache("com.example", "com", "cn", "org");
-            log.info("使用fallback包路径扫描@MyTable注解");
-        } catch (Exception e) {
-            log.error("Fallback扫描也失败了: {}", e.getMessage());
-        }
-    }
-
     public static TableInfo getTableInfo(Class<?> aClass){
         TableInfo tableInfo = tableInfoMap.get(aClass);
         if (tableInfo == null) {
