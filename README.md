@@ -151,6 +151,45 @@ myjpa:
     column: tenant_id    # 租户字段列名（可自定义，如 org_id）
 ```
 
+### MyJPA 配置总览（与代码同步）
+
+以下配置以 `src/main/java/io/github/mocanjie/base/myjpa/configuration/MyJpaAutoConfiguration.java` 为准：
+
+| 配置项 | 默认值 | 说明 |
+|---|---|---|
+| `myjpa.show-sql.enabled` | `false` | 是否由 myjpa 自动设置 JDBC SQL 日志级别 |
+| `myjpa.show-sql.sql-level` | `DEBUG` | `org.springframework.jdbc.core.JdbcTemplate` 日志级别 |
+| `myjpa.show-sql.param-level` | `TRACE` | `org.springframework.jdbc.core.StatementCreatorUtils` 日志级别 |
+| `myjpa.show-sql-time` | `false` | 是否打印每条 SQL 执行耗时（`INFO`） |
+| `myjpa.validate-schema` | `true` | 启动时是否执行数据库表结构校验 |
+| `myjpa.tenant.enabled` | `false` | 是否开启多租户 SQL 条件注入 |
+| `myjpa.tenant.column` | `tenant_id` | 租户列名 |
+
+补充项（JVM 系统参数）：
+
+| 参数 | 默认值 | 说明 |
+|---|---|---|
+| `-Dmyjpa.fail-on-validation-error` | `false` | `true` 时，数据库模式校验失败将阻断应用启动 |
+
+兼容旧配置（建议迁移到新键名）：
+
+| 旧配置项 | 新配置项 |
+|---|---|
+| `myjpa.showsql` | `myjpa.show-sql.enabled` |
+| `myjpa.showsql.enabled` | `myjpa.show-sql.enabled` |
+| `myjpa.showsql.sql-level` | `myjpa.show-sql.sql-level` |
+| `myjpa.showsql.param-level` | `myjpa.show-sql.param-level` |
+
+### 配置变更后如何同步 README
+
+每次涉及 `myjpa.*` 配置变更，按下面步骤同步：
+
+1. 修改代码配置源（当前在 `MyJpaAutoConfiguration` 的 `@Value`）。
+2. 同步更新本节「MyJPA 配置总览（与代码同步）」表格。
+3. 若引入兼容别名，更新「兼容旧配置」映射表。
+4. 至少补一个测试，覆盖新配置默认值或行为分支。
+5. PR 描述中附上“新增/变更配置项”清单，便于发布说明复用。
+
 ### 定义实体类
 
 实体类必须同时满足两个条件（APT 编译期校验，缺一报错）：
