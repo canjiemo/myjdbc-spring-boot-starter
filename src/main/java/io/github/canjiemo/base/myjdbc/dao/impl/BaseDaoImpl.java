@@ -40,6 +40,7 @@ public class BaseDaoImpl implements IBaseDao {
 	protected static Logger log = LoggerFactory.getLogger(BaseDaoImpl.class);
 	private static final SingleColumnRowMapper<Long> COUNT_ROW_MAPPER = new SingleColumnRowMapper<>(Long.class);
 	private static final int MAX_LOG_PARAM_LENGTH = 128;
+	private static final int DEFAULT_QUERY_REWRITE_CACHE_SIZE = 1024;
 	private final Map<Class<?>, RowMapper<?>> rowMapperCache = new ConcurrentHashMap<>();
 	private final Map<String, ParsedSql> parsedSqlCache = new ConcurrentHashMap<>();
 	// 高频 DAO 路径只读这些快照字段，避免每次执行 SQL 都走可变配置对象访问。
@@ -49,14 +50,20 @@ public class BaseDaoImpl implements IBaseDao {
 	private final String tenantColumn;
 	private final String tenantColumnLowerCase;
 	private final String tenantFieldName;
+	private final SqlRewriteCache queryRewriteCache;
 
 	public BaseDaoImpl(MyJdbcProperties properties) {
+		this(properties, DEFAULT_QUERY_REWRITE_CACHE_SIZE);
+	}
+
+	BaseDaoImpl(MyJdbcProperties properties, int queryRewriteCacheSize) {
 		this.showSqlEnabled = properties != null && properties.getShowSql().isEnabled();
 		this.showSqlTimeEnabled = this.showSqlEnabled || (properties != null && properties.isShowSqlTime());
 		this.tenantIsolationEnabled = properties != null && properties.getTenant().isEnabled();
 		this.tenantColumn = resolveTenantColumn(properties);
 		this.tenantColumnLowerCase = this.tenantColumn.toLowerCase(Locale.ROOT);
 		this.tenantFieldName = io.github.canjiemo.base.myjdbc.utils.CommonUtils.underscoreToCamelCase(this.tenantColumn);
+		this.queryRewriteCache = new SqlRewriteCache(queryRewriteCacheSize);
 	}
 
 	private <T> T executeWithTiming(String sql, java.util.function.Supplier<T> operation) {
@@ -251,7 +258,7 @@ public class BaseDaoImpl implements IBaseDao {
 
 		if (tenantId != null) {
 			// 单次解析：同时注入删除条件 + 租户条件
-			String processedSql = JSqlDynamicSqlParser.appendConditions(sql, true, tenantColumn);
+			String processedSql = rewriteQuerySql(sql, QueryRewriteMode.DELETE_AND_TENANT);
 			if (processedSql.contains(":" + JSqlDynamicSqlParser.TENANT_PARAM_NAME)) {
 				return new ConditionResult(processedSql,
 						new TenantAwareSqlParameterSource(sps, JSqlDynamicSqlParser.TENANT_PARAM_NAME, tenantId));
@@ -259,8 +266,32 @@ public class BaseDaoImpl implements IBaseDao {
 			return new ConditionResult(processedSql, sps);
 		} else {
 			// 单次解析：只注入删除条件
-			return new ConditionResult(JSqlDynamicSqlParser.appendDeleteCondition(sql), sps);
+			return new ConditionResult(rewriteQuerySql(sql, QueryRewriteMode.DELETE_ONLY), sps);
 		}
+	}
+
+	String rewriteQuerySql(String sql, boolean includeTenantCondition) {
+		return rewriteQuerySql(sql,
+				includeTenantCondition ? QueryRewriteMode.DELETE_AND_TENANT : QueryRewriteMode.DELETE_ONLY);
+	}
+
+	int getQueryRewriteCacheSize() {
+		return queryRewriteCache.size();
+	}
+
+	private String rewriteQuerySql(String sql, QueryRewriteMode mode) {
+		if (sql == null || sql.isBlank()) {
+			return sql;
+		}
+		return queryRewriteCache.getOrLoad(new RewriteCacheKey(sql, mode, tenantColumn),
+				BaseDaoImpl::loadRewrittenSql);
+	}
+
+	private static String loadRewrittenSql(RewriteCacheKey key) {
+		return switch (key.mode()) {
+			case DELETE_ONLY -> JSqlDynamicSqlParser.appendDeleteCondition(key.sql());
+			case DELETE_AND_TENANT -> JSqlDynamicSqlParser.appendConditions(key.sql(), true, key.tenantColumn());
+		};
 	}
 
 	private <T> T querySingleInternal(String sql, SqlParameterSource sps, Class<T> clazz) {
@@ -604,6 +635,50 @@ public class BaseDaoImpl implements IBaseDao {
 			return "tenant_id";
 		}
 		return properties.getTenant().getColumn().trim();
+	}
+
+	private enum QueryRewriteMode {
+		DELETE_ONLY,
+		DELETE_AND_TENANT
+	}
+
+	private record RewriteCacheKey(String sql, QueryRewriteMode mode, String tenantColumn) {}
+
+	private static final class SqlRewriteCache {
+		private final int maxSize;
+		private final LinkedHashMap<RewriteCacheKey, String> delegate;
+
+		private SqlRewriteCache(int maxSize) {
+			this.maxSize = Math.max(1, maxSize);
+			this.delegate = new LinkedHashMap<>(16, 0.75f, true) {
+				@Override
+				protected boolean removeEldestEntry(Map.Entry<RewriteCacheKey, String> eldest) {
+					return size() > SqlRewriteCache.this.maxSize;
+				}
+			};
+		}
+
+		String getOrLoad(RewriteCacheKey key, java.util.function.Function<RewriteCacheKey, String> loader) {
+			synchronized (this) {
+				String cached = delegate.get(key);
+				if (cached != null) {
+					return cached;
+				}
+			}
+			String loaded = loader.apply(key);
+			synchronized (this) {
+				String cached = delegate.get(key);
+				if (cached != null) {
+					return cached;
+				}
+				delegate.put(key, loaded);
+				return loaded;
+			}
+		}
+
+		synchronized int size() {
+			return delegate.size();
+		}
 	}
 
 }
