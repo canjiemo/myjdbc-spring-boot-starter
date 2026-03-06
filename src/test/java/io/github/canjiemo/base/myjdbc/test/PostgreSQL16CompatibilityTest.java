@@ -436,4 +436,36 @@ class PostgreSQL16CompatibilityTest {
         assertTrue(result.contains("is_deleted"), "外层 role 表应注入 is_deleted");
         assertTrue(result.contains("delete_flag"), "NOT EXISTS 子查询内 user 表应注入 delete_flag");
     }
+
+    // =========================================================
+    // 11. 排序参数安全校验（负向）
+    // =========================================================
+
+    @Test
+    @Order(28)
+    @DisplayName("11.1 非法排序字段应抛出 IllegalArgumentException")
+    void test28_illegalSortColumnThrows() {
+        String sql = "SELECT * FROM \"user\"";
+        Pager<Object> pager = new Pager<>(1, 10);
+        pager.setSort("id; DROP TABLE user; --");
+        pager.setOrder("asc");
+
+        assertThrows(IllegalArgumentException.class,
+                () -> sqlBuilder.buildPagerSql(sql, pager),
+                "非法排序字段应抛出 IllegalArgumentException");
+    }
+
+    @Test
+    @Order(29)
+    @DisplayName("11.2 非法排序方向应抛出 IllegalArgumentException")
+    void test29_illegalOrderDirectionThrows() {
+        String sql = "SELECT * FROM \"user\"";
+        Pager<Object> pager = new Pager<>(1, 10);
+        pager.setSort("id");
+        pager.setOrder("HACK");
+
+        assertThrows(IllegalArgumentException.class,
+                () -> sqlBuilder.buildPagerSql(sql, pager),
+                "非法排序方向应抛出 IllegalArgumentException");
+    }
 }

@@ -432,4 +432,50 @@ class MySQL8CompatibilityTest {
         assertTrue(result.contains("is_deleted"), "外层 role 表应注入 is_deleted");
         assertTrue(result.contains("delete_flag"), "NOT EXISTS 子查询内 user 表应注入 delete_flag");
     }
+
+    // =========================================================
+    // 7. 排序参数安全校验（负向）
+    // =========================================================
+
+    @Test
+    @Order(29)
+    @DisplayName("7.1 非法排序字段应抛出 IllegalArgumentException")
+    void test29_illegalSortColumnThrows() {
+        String sql = "SELECT * FROM user";
+        Pager<Object> pager = new Pager<>(1, 10);
+        pager.setSort("id; DROP TABLE user; --");
+        pager.setOrder("asc");
+
+        assertThrows(IllegalArgumentException.class,
+                () -> sqlBuilder.buildPagerSql(sql, pager),
+                "非法排序字段应抛出 IllegalArgumentException");
+    }
+
+    @Test
+    @Order(30)
+    @DisplayName("7.2 非法排序方向应抛出 IllegalArgumentException")
+    void test30_illegalOrderDirectionThrows() {
+        String sql = "SELECT * FROM user";
+        Pager<Object> pager = new Pager<>(1, 10);
+        pager.setSort("id");
+        pager.setOrder("INVALID");
+
+        assertThrows(IllegalArgumentException.class,
+                () -> sqlBuilder.buildPagerSql(sql, pager),
+                "非法排序方向应抛出 IllegalArgumentException");
+    }
+
+    @Test
+    @Order(31)
+    @DisplayName("7.3 合法驼峰排序字段正常生成 SQL")
+    void test31_validCamelCaseSortColumn() {
+        String sql = "SELECT * FROM user";
+        Pager<Object> pager = new Pager<>(1, 10);
+        pager.setSort("createTime");
+        pager.setOrder("asc");
+
+        String result = sqlBuilder.buildPagerSql(sql, pager);
+        assertTrue(result.contains("create_time"), "驼峰 createTime 应转换为 create_time");
+        assertTrue(result.toLowerCase().contains("asc"), "排序方向应保留");
+    }
 }

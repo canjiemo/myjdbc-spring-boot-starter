@@ -3,6 +3,7 @@ package io.github.canjiemo.base.myjdbc.builder;
 import io.github.canjiemo.mycommon.pager.Pager;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.BeanInitializationException;
 import org.springframework.util.StringUtils;
 
 import javax.sql.DataSource;
@@ -63,11 +64,11 @@ public class SqlBuilder {
 			} else if ("postgresql".equals(typeName)) {
 				detected = DbType.POSTGRESQL;
 			} else {
-				log.info("没匹对正确的数据库版本，默认使用mysql模式");
+				log.warn("未识别的数据库产品名 [{}]，默认使用 MySQL 分页模式", typeName);
 			}
 		} catch (Exception e) {
 			log.error("获取数据库类型异常", e);
-			throw new Error("myjdbc组件加载失败");
+			throw new BeanInitializationException("myjdbc 组件初始化失败：无法获取数据库类型", e);
 		} finally {
 			if (connection != null) {
 				try {
