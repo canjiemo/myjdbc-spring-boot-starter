@@ -56,17 +56,18 @@ public class MyJdbcAutoConfiguration {
     }
 
     @Bean
-    @ConditionalOnBean(NamedParameterJdbcTemplate.class)
+    @ConditionalOnBean({NamedParameterJdbcTemplate.class, SqlBuilder.class})
     @ConditionalOnMissingBean(IBaseDao.class)
-    public BaseDaoImpl baseDao(MyJdbcProperties properties, NamedParameterJdbcTemplate namedParameterJdbcTemplate){
-        return new BaseDaoImpl(properties);
+    public BaseDaoImpl baseDao(MyJdbcProperties properties, NamedParameterJdbcTemplate namedParameterJdbcTemplate,
+                               SqlBuilder sqlBuilder){
+        return new BaseDaoImpl(properties, sqlBuilder);
     }
 
     @Bean
-    @ConditionalOnClass(DataSource.class)
+    @ConditionalOnBean(DataSource.class)
     @ConditionalOnMissingBean(SqlBuilder.class)
-    public SqlBuilder sqlBuilder(){
-        return new SqlBuilder();
+    public SqlBuilder sqlBuilder(DataSource dataSource){
+        return new SqlBuilder(dataSource);
     }
     
     @Bean

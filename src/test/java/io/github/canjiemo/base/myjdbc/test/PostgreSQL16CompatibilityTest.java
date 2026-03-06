@@ -1,5 +1,6 @@
 package io.github.canjiemo.base.myjdbc.test;
 
+import io.github.canjiemo.base.myjdbc.builder.DbType;
 import io.github.canjiemo.base.myjdbc.builder.SqlBuilder;
 import io.github.canjiemo.base.myjdbc.cache.TableCacheManager;
 import io.github.canjiemo.base.myjdbc.parser.JSqlDynamicSqlParser;
@@ -20,9 +21,11 @@ import static org.junit.jupiter.api.Assertions.*;
 @DisplayName("PostgreSQL 16 兼容性测试")
 class PostgreSQL16CompatibilityTest {
 
+    private static SqlBuilder sqlBuilder;
+
     @BeforeAll
     static void setup() {
-        SqlBuilder.type = 5; // PostgreSQL 模式
+        sqlBuilder = new SqlBuilder(DbType.POSTGRESQL);
         TableCacheManager.initCache("io.github.canjiemo.base.myjdbc.test.entity");
         assertNotNull(TableCacheManager.getDeleteInfoByTableName("user"),
                 "TestUser (@MyTable value=user) 应被成功缓存");
@@ -40,7 +43,7 @@ class PostgreSQL16CompatibilityTest {
     void test01_basicOffsetLimitPagination() {
         String sql = "SELECT * FROM \"user\" WHERE age > 18";
         Pager<Object> pager = new Pager<>(1, 10);
-        String result = SqlBuilder.buildPagerSql(sql, pager);
+        String result = sqlBuilder.buildPagerSql(sql, pager);
 
         assertTrue(result.contains("OFFSET"), "应包含 OFFSET 关键字");
         assertTrue(result.contains("LIMIT"), "应包含 LIMIT 关键字");
@@ -59,7 +62,7 @@ class PostgreSQL16CompatibilityTest {
         Pager<Object> pager = new Pager<>(2, 20);
         pager.setSort("createTime");
         pager.setOrder("DESC");
-        String result = SqlBuilder.buildPagerSql(sql, pager);
+        String result = sqlBuilder.buildPagerSql(sql, pager);
 
         assertTrue(result.contains("OFFSET 20"), "第2页 OFFSET 应为 (2-1)*20=20");
         assertTrue(result.contains("LIMIT 20"), "页大小应为 20");
@@ -75,7 +78,7 @@ class PostgreSQL16CompatibilityTest {
     void test03_largeOffsetPagination() {
         String sql = "SELECT * FROM \"user\"";
         Pager<Object> pager = new Pager<>(1000, 50);
-        String result = SqlBuilder.buildPagerSql(sql, pager);
+        String result = sqlBuilder.buildPagerSql(sql, pager);
 
         assertTrue(result.contains("OFFSET 49950"),
                 "第1000页×50条/页，OFFSET 应为 (1000-1)*50=49950");

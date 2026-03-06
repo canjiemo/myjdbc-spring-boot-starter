@@ -1,6 +1,5 @@
 package io.github.canjiemo.base.myjdbc.test;
 
-import io.github.canjiemo.base.myjdbc.builder.SqlBuilder;
 import io.github.canjiemo.base.myjdbc.cache.TableCacheManager;
 import io.github.canjiemo.base.myjdbc.lambda.LambdaQueryWrapper;
 import io.github.canjiemo.base.myjdbc.test.entity.TestUser;
@@ -22,7 +21,6 @@ class LambdaQueryWrapperTest {
 
     @BeforeAll
     static void setup() {
-        SqlBuilder.type = 1;
         TableCacheManager.initCache("io.github.canjiemo.base.myjdbc.test.entity");
     }
 

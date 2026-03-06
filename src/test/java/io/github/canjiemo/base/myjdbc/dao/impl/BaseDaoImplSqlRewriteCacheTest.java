@@ -1,5 +1,7 @@
 package io.github.canjiemo.base.myjdbc.dao.impl;
 
+import io.github.canjiemo.base.myjdbc.builder.DbType;
+import io.github.canjiemo.base.myjdbc.builder.SqlBuilder;
 import io.github.canjiemo.base.myjdbc.cache.TableCacheManager;
 import io.github.canjiemo.base.myjdbc.configuration.MyJdbcProperties;
 import io.github.canjiemo.base.myjdbc.tenant.TenantContext;
@@ -8,9 +10,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.*;
 
 @DisplayName("BaseDaoImpl SQL 改写缓存测试")
 class BaseDaoImplSqlRewriteCacheTest {
@@ -31,7 +31,7 @@ class BaseDaoImplSqlRewriteCacheTest {
     @Test
     @DisplayName("相同 SQL 的删除条件改写结果应命中缓存")
     void shouldCacheDeleteOnlyRewriteTemplate() {
-        BaseDaoImpl dao = new BaseDaoImpl(tenantEnabledProperties(), 16);
+        BaseDaoImpl dao = new BaseDaoImpl(tenantEnabledProperties(), 16, new SqlBuilder(DbType.MYSQL));
 
         String sql = "SELECT * FROM user WHERE age > 18";
         String first = dao.rewriteQuerySql(sql, false);
@@ -46,7 +46,7 @@ class BaseDaoImplSqlRewriteCacheTest {
     @Test
     @DisplayName("租户路径和非租户路径应使用独立缓存键")
     void shouldSeparateDeleteOnlyAndTenantRewriteEntries() {
-        BaseDaoImpl dao = new BaseDaoImpl(tenantEnabledProperties(), 16);
+        BaseDaoImpl dao = new BaseDaoImpl(tenantEnabledProperties(), 16, new SqlBuilder(DbType.MYSQL));
 
         String sql = "SELECT * FROM user WHERE age > 18";
         String deleteOnly = dao.rewriteQuerySql(sql, false);
@@ -62,7 +62,7 @@ class BaseDaoImplSqlRewriteCacheTest {
     @Test
     @DisplayName("改写缓存应保持上限，避免无限增长")
     void shouldKeepRewriteCacheBounded() {
-        BaseDaoImpl dao = new BaseDaoImpl(tenantEnabledProperties(), 8);
+        BaseDaoImpl dao = new BaseDaoImpl(tenantEnabledProperties(), 8, new SqlBuilder(DbType.MYSQL));
 
         for (int i = 0; i < 32; i++) {
             dao.rewriteQuerySql("SELECT * FROM user WHERE age > " + i, true);

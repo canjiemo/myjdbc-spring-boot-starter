@@ -1,189 +1,198 @@
 package io.github.canjiemo.base.myjdbc.builder;
 
 import io.github.canjiemo.mycommon.pager.Pager;
-import jakarta.annotation.PostConstruct;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.util.StringUtils;
 
 import javax.sql.DataSource;
 import java.sql.Connection;
+import java.util.Locale;
+import java.util.regex.Pattern;
 
 public class SqlBuilder {
 
-	protected  Logger logger = LoggerFactory.getLogger(getClass());
+	protected Logger logger = LoggerFactory.getLogger(getClass());
 
-	public static int type = 1;
+	private final DbType dbType;
 
-//	public static String db_schema;
+	/** 排序列白名单：只允许字母、数字、下划线、点（支持 table.column 写法） */
+	private static final Pattern SAFE_SORT_COLUMN_PATTERN =
+			Pattern.compile("^[a-zA-Z_][a-zA-Z0-9_.]*$");
 
-	@Autowired
-	private DataSource ds;
+	/**
+	 * Spring 使用：传入 DataSource，构造时自动检测数据库类型。
+	 */
+	public SqlBuilder(DataSource dataSource) {
+		this.dbType = detectDbType(dataSource);
+	}
 
-	@PostConstruct
-	public void init(){
+	/**
+	 * 直接指定数据库类型（枚举，推荐）。适用于测试或多数据源手动配置。
+	 */
+	public SqlBuilder(DbType dbType) {
+		this.dbType = dbType;
+	}
+
+	/**
+	 * 直接指定数据库类型码（整型），不合法时立即抛出异常。
+	 * 适用于已有 int 常量的兼容场景；新代码优先使用 {@link #SqlBuilder(DbType)}。
+	 */
+	public SqlBuilder(int code) {
+		this.dbType = DbType.fromCode(code);
+	}
+
+	private static DbType detectDbType(DataSource ds) {
+		Logger log = LoggerFactory.getLogger(SqlBuilder.class);
 		String typeName = null;
 		String version = null;
 		Connection connection = null;
-		try{
+		DbType detected = DbType.MYSQL;
+		try {
 			connection = ds.getConnection();
-			typeName = CnvSmallChr(connection.getMetaData().getDatabaseProductName());
-			version = CnvSmallChr(connection.getMetaData().getDatabaseProductVersion());
-//			db_schema = connection.getCatalog();
-			if ("mysql".equalsIgnoreCase(typeName)) {
-				type = 1;
-		    }else if ("oracle".equalsIgnoreCase(typeName)) {
-		    	type = 2;
-		    }else if (("sqlserver".equalsIgnoreCase(typeName)) || (typeName.contains("microsoft"))) {
-		    	type = 3;
-		    }
-			else if (("kingbasees".equalsIgnoreCase(typeName))) {
-				type = 4;
+			typeName = connection.getMetaData().getDatabaseProductName().toLowerCase(Locale.ROOT);
+			version  = connection.getMetaData().getDatabaseProductVersion().toLowerCase(Locale.ROOT);
+			if ("mysql".equals(typeName)) {
+				detected = DbType.MYSQL;
+			} else if ("oracle".equals(typeName)) {
+				detected = DbType.ORACLE;
+			} else if ("sqlserver".equals(typeName) || typeName.contains("microsoft")) {
+				detected = DbType.SQL_SERVER;
+			} else if ("kingbasees".equals(typeName)) {
+				detected = DbType.KINGBASE_ES;
+			} else if ("postgresql".equals(typeName)) {
+				detected = DbType.POSTGRESQL;
+			} else {
+				log.info("没匹对正确的数据库版本，默认使用mysql模式");
 			}
-			else if (("postgresql".equalsIgnoreCase(typeName))) {
-				type = 5;
-			}
-			else{
-//		    	throw new Error("不支持数据库类型：" + typeName);
-				logger.info("没匹对正确的数据库版本，默认使用mysql模式");
-		    }
-		}catch(Exception e){
-			logger.error("获取数据库类型异常",e);
+		} catch (Exception e) {
+			log.error("获取数据库类型异常", e);
 			throw new Error("myjdbc组件加载失败");
 		} finally {
-			if(connection != null) {
+			if (connection != null) {
 				try {
 					connection.close();
-				} catch (Exception ignore){}
+				} catch (Exception ignore) {}
 			}
 		}
-		logger.info("数据库类型: {}  版本信息:{}",typeName,version);
+		log.info("数据库类型: {}  版本信息:{}", typeName, version);
+		return detected;
 	}
 
-	private static boolean isBigChr(char chr)
-	  {
-	    return ('@' < chr) && (chr < '[');
-	  }
-
-	private static String CnvSmallChr(String str)
-	  {
-	    char[] chrArry = str.toCharArray();
-	    for (int i = 0; i < chrArry.length; i++) {
-	      if (isBigChr(chrArry[i]))
-	      {
-	        int tmp24_23 = i; char[] tmp24_22 = chrArry;tmp24_22[tmp24_23] = ((char)(tmp24_22[tmp24_23] + ' '));
-	      }
-	    }
-	    return new String(chrArry);
-	  }
-
-	public static String buildPagerSql(String sql, Pager pager){
-		if(type==1 || type==4){
-			return  buildMysqlPagerSql(sql, pager);
+	/**
+	 * 校验并转换排序列名（驼峰→下划线），非法值抛出 IllegalArgumentException。
+	 * 防止排序字段 SQL 注入。
+	 */
+	private static String validateAndConvertSortColumn(String sortColumn) {
+		if (!StringUtils.hasText(sortColumn)) return null;
+		String converted = camelCaseToUnderscore(sortColumn);
+		if (!SAFE_SORT_COLUMN_PATTERN.matcher(converted).matches()) {
+			throw new IllegalArgumentException("非法排序字段: " + sortColumn);
 		}
-		if(type==2){
-			return  buildOraclePagerSql(sql, pager);
-		}
-		if(type==3){
-			return  buildSqlServerPagerSql(sql, pager);
-		}
-		if(type==5){
-			return  buildPgsqlPagerSql(sql, pager);
-		}
-		//默认
-		return buildMysqlPagerSql(sql, pager);
+		return converted;
 	}
 
+	/**
+	 * 校验排序方向，只允许 asc / desc（大小写不敏感），非法值抛出 IllegalArgumentException。
+	 */
+	private static String validateOrder(String order) {
+		if (!StringUtils.hasText(order)) return null;
+		if (!"asc".equalsIgnoreCase(order) && !"desc".equalsIgnoreCase(order)) {
+			throw new IllegalArgumentException("非法排序方向: " + order);
+		}
+		return order.toLowerCase(Locale.ROOT);
+	}
+
+	public String buildPagerSql(String sql, Pager pager) {
+		return switch (dbType) {
+			case ORACLE     -> buildOraclePagerSql(sql, pager);
+			case SQL_SERVER -> buildSqlServerPagerSql(sql, pager);
+			case POSTGRESQL -> buildPgsqlPagerSql(sql, pager);
+			default         -> buildMysqlPagerSql(sql, pager); // MYSQL + KINGBASE_ES
+		};
+	}
 
 	/**
 	 * sqlserver
-	 * @param sql
-	 * @param pager
-	 * @return
 	 */
-	private static String buildSqlServerPagerSql(String sql,Pager pager){
+	private static String buildSqlServerPagerSql(String sql, Pager pager) {
 		StringBuilder pagingSelect = new StringBuilder(300);
-	    sql = sql.replaceFirst("^\\s*[sS][eE][lL][eE][cC][tT]\\s+", "select top " + (pager.getStartRow() + pager.getPageSize()) + " ");
-	    pagingSelect.append(" select * from ( select row_number()over(order by __tc__)tempRowNumber,* from (select    __tc__=0, *  from ( ");
-	    pagingSelect.append(" select top 100 percent * from ( ");
-	    pagingSelect.append(sql);
-	    pagingSelect.append(" )  as _sqlservertb_  ");
-	    String sortColumn = pager.getSort();
-	    if(StringUtils.hasText(sortColumn) && StringUtils.hasText(pager.getOrder())){
-	    	pagingSelect.append(" order by " + camelCaseToUnderscore(sortColumn)  +" " + pager.getOrder());
-	    }
-	    pagingSelect.append(" ) t )tt )ttt where tempRowNumber > ").append(pager.getStartRow()).append(" and tempRowNumber <= ").append(pager.getStartRow() + pager.getPageSize());
-	    return pagingSelect.toString();
+		sql = sql.replaceFirst("^\\s*[sS][eE][lL][eE][cC][tT]\\s+", "select top " + (pager.getStartRow() + pager.getPageSize()) + " ");
+		pagingSelect.append(" select * from ( select row_number()over(order by __tc__)tempRowNumber,* from (select    __tc__=0, *  from ( ");
+		pagingSelect.append(" select top 100 percent * from ( ");
+		pagingSelect.append(sql);
+		pagingSelect.append(" )  as _sqlservertb_  ");
+		String sortColumn = validateAndConvertSortColumn(pager.getSort());
+		String order = validateOrder(pager.getOrder());
+		if (sortColumn != null && order != null) {
+			pagingSelect.append(" order by ").append(sortColumn).append(" ").append(order);
+		}
+		pagingSelect.append(" ) t )tt )ttt where tempRowNumber > ").append(pager.getStartRow()).append(" and tempRowNumber <= ").append(pager.getStartRow() + pager.getPageSize());
+		return pagingSelect.toString();
 	}
 
 	/**
-	 * mysql
-	 * @param sql
-	 * @param pager
-	 * @return
+	 * postgresql
 	 */
-	private static String buildPgsqlPagerSql(String sql,Pager pager){
+	private static String buildPgsqlPagerSql(String sql, Pager pager) {
 		StringBuilder pagingSelect = new StringBuilder(300);
 		pagingSelect.append(" select * from ( ");
 		pagingSelect.append(sql);
 		pagingSelect.append(" ) as _pgsqltb_ ");
-		String sortColumn = pager.getSort();
-		if(StringUtils.hasText(sortColumn) && StringUtils.hasText(pager.getOrder())){
-			pagingSelect.append(" order by " + camelCaseToUnderscore(sortColumn) +" " + pager.getOrder());
+		String sortColumn = validateAndConvertSortColumn(pager.getSort());
+		String order = validateOrder(pager.getOrder());
+		if (sortColumn != null && order != null) {
+			pagingSelect.append(" order by ").append(sortColumn).append(" ").append(order);
 		}
 		pagingSelect.append(" OFFSET ").append(pager.getStartRow()).append(" LIMIT ").append(pager.getPageSize());
 		return pagingSelect.toString();
 	}
 
 	/**
-	 * mysql
-	 * @param sql
-	 * @param pager
-	 * @return
+	 * mysql / kingbasees
 	 */
-	private static String buildMysqlPagerSql(String sql,Pager pager){
+	private static String buildMysqlPagerSql(String sql, Pager pager) {
 		StringBuilder pagingSelect = new StringBuilder(300);
 		pagingSelect.append(" select * from ( ");
-	    pagingSelect.append(sql);
-	    pagingSelect.append(" ) as _mysqltb_ ");
-	    String sortColumn = pager.getSort();
-	    if(StringUtils.hasText(sortColumn) && StringUtils.hasText(pager.getOrder())){
-	    	pagingSelect.append(" order by " + camelCaseToUnderscore(sortColumn) +" " + pager.getOrder());
-	    }
-	    pagingSelect.append(" limit ").append(pager.getStartRow()).append(",").append(pager.getPageSize());
-	    return pagingSelect.toString();
+		pagingSelect.append(sql);
+		pagingSelect.append(" ) as _mysqltb_ ");
+		String sortColumn = validateAndConvertSortColumn(pager.getSort());
+		String order = validateOrder(pager.getOrder());
+		if (sortColumn != null && order != null) {
+			pagingSelect.append(" order by ").append(sortColumn).append(" ").append(order);
+		}
+		pagingSelect.append(" limit ").append(pager.getStartRow()).append(",").append(pager.getPageSize());
+		return pagingSelect.toString();
 	}
 
 	/**
 	 * oracle
-	 * @param sql
-	 * @param pager
-	 * @return
+	 * 注：Oracle 子查询别名不使用 AS 关键字
 	 */
-	private static String buildOraclePagerSql(String sql,Pager pager){
+	private static String buildOraclePagerSql(String sql, Pager pager) {
 		StringBuilder pagingSelect = new StringBuilder(300);
-	    pagingSelect.append("select * from ( select row_.*, rownum rownum_userforpage from ( ");
-	    pagingSelect.append(" select * from ( ");
-	    pagingSelect.append(sql);
-	    pagingSelect.append(" )  as _oracletb_  ");
-	    String sortColumn = pager.getSort();
-	    if(StringUtils.hasText(sortColumn) && StringUtils.hasText(pager.getOrder())){
-	    	pagingSelect.append(" order by " + camelCaseToUnderscore(sortColumn)  +" " + pager.getOrder());
-	    }
-	    pagingSelect.append(" ) row_ where rownum <= ")
-	    .append(pager.getStartRow() + pager.getPageSize())
-	    .append(") where rownum_userforpage > ")
-	    .append(pager.getStartRow());
-	    return pagingSelect.toString();
+		pagingSelect.append("select * from ( select row_.*, rownum rownum_userforpage from ( ");
+		pagingSelect.append(" select * from ( ");
+		pagingSelect.append(sql);
+		pagingSelect.append(" )  _oracletb_  ");
+		String sortColumn = validateAndConvertSortColumn(pager.getSort());
+		String order = validateOrder(pager.getOrder());
+		if (sortColumn != null && order != null) {
+			pagingSelect.append(" order by ").append(sortColumn).append(" ").append(order);
+		}
+		pagingSelect.append(" ) row_ where rownum <= ")
+				.append(pager.getStartRow() + pager.getPageSize())
+				.append(") where rownum_userforpage > ")
+				.append(pager.getStartRow());
+		return pagingSelect.toString();
 	}
 
-	public static String camelCaseToUnderscore(String str){
-		if(!StringUtils.hasText(str)) return str;
+	public static String camelCaseToUnderscore(String str) {
+		if (!StringUtils.hasText(str)) return str;
 		StringBuilder sb = new StringBuilder(str.length());
-		for(int i = 0;i<str.length();i++){
+		for (int i = 0; i < str.length(); i++) {
 			char c = str.charAt(i);
-			if(Character.isUpperCase(c)){
+			if (Character.isUpperCase(c)) {
 				sb.append("_");
 				sb.append(Character.toLowerCase(c));
 				continue;

@@ -1,5 +1,6 @@
 package io.github.canjiemo.base.myjdbc.configuration;
 
+import io.github.canjiemo.base.myjdbc.builder.DbType;
 import io.github.canjiemo.base.myjdbc.builder.SqlBuilder;
 import io.github.canjiemo.base.myjdbc.builder.TableInfoBuilder;
 import io.github.canjiemo.base.myjdbc.cache.TableCacheManager;
@@ -63,7 +64,7 @@ class MyJdbcAutoConfigurationTest {
         context.registerBean("customBaseDao", IBaseDao.class, () -> proxyOf(IBaseDao.class));
         context.registerBean("customBaseService", IBaseService.class, () -> proxyOf(IBaseService.class));
         context.registerBean("customTableInfoBuilder", TableInfoBuilder.class, TableInfoBuilder::new);
-        context.registerBean("customSqlBuilder", SqlBuilder.class, SqlBuilder::new);
+        context.registerBean("customSqlBuilder", SqlBuilder.class, () -> new SqlBuilder(DbType.MYSQL));
         context.register(MyJdbcAutoConfiguration.class);
 
         context.refresh();
@@ -88,8 +89,8 @@ class MyJdbcAutoConfigurationTest {
     void defaultBeanFactoryMethodsShouldBeConditionalOnMissingBean() throws Exception {
         assertConditionalOnMissingBean("baseService", IBaseDao.class, JdbcTemplate.class, NamedParameterJdbcTemplate.class);
         assertConditionalOnMissingBean("tableInfoBuilder");
-        assertConditionalOnMissingBean("baseDao", MyJdbcProperties.class, NamedParameterJdbcTemplate.class);
-        assertConditionalOnMissingBean("sqlBuilder");
+        assertConditionalOnMissingBean("baseDao", MyJdbcProperties.class, NamedParameterJdbcTemplate.class, SqlBuilder.class);
+        assertConditionalOnMissingBean("sqlBuilder", DataSource.class);
         assertConditionalOnMissingBean("databaseSchemaValidator", JdbcTemplate.class, DataSource.class, MyJdbcProperties.class);
         assertConditionalOnMissingBean("schemaValidationRunner", MyJdbcProperties.class, DatabaseSchemaValidator.class);
     }

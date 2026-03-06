@@ -23,8 +23,8 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.RowMapper;
-import org.springframework.jdbc.core.SqlParameterValue;
 import org.springframework.jdbc.core.SingleColumnRowMapper;
+import org.springframework.jdbc.core.SqlParameterValue;
 import org.springframework.jdbc.core.namedparam.*;
 import org.springframework.jdbc.support.GeneratedKeyHolder;
 import org.springframework.jdbc.support.KeyHolder;
@@ -51,12 +51,13 @@ public class BaseDaoImpl implements IBaseDao {
 	private final String tenantColumnLowerCase;
 	private final String tenantFieldName;
 	private final SqlRewriteCache queryRewriteCache;
+	private final SqlBuilder sqlBuilder;
 
-	public BaseDaoImpl(MyJdbcProperties properties) {
-		this(properties, DEFAULT_QUERY_REWRITE_CACHE_SIZE);
+	public BaseDaoImpl(MyJdbcProperties properties, SqlBuilder sqlBuilder) {
+		this(properties, DEFAULT_QUERY_REWRITE_CACHE_SIZE, sqlBuilder);
 	}
 
-	BaseDaoImpl(MyJdbcProperties properties, int queryRewriteCacheSize) {
+	BaseDaoImpl(MyJdbcProperties properties, int queryRewriteCacheSize, SqlBuilder sqlBuilder) {
 		this.showSqlEnabled = properties != null && properties.getShowSql().isEnabled();
 		this.showSqlTimeEnabled = this.showSqlEnabled || (properties != null && properties.isShowSqlTime());
 		this.tenantIsolationEnabled = properties != null && properties.getTenant().isEnabled();
@@ -64,6 +65,7 @@ public class BaseDaoImpl implements IBaseDao {
 		this.tenantColumnLowerCase = this.tenantColumn.toLowerCase(Locale.ROOT);
 		this.tenantFieldName = io.github.canjiemo.base.myjdbc.utils.CommonUtils.underscoreToCamelCase(this.tenantColumn);
 		this.queryRewriteCache = new SqlRewriteCache(queryRewriteCacheSize);
+		this.sqlBuilder = sqlBuilder;
 	}
 
 	private <T> T executeWithTiming(String sql, java.util.function.Supplier<T> operation) {
@@ -399,13 +401,13 @@ public class BaseDaoImpl implements IBaseDao {
 			String countSql = "select count(*) from ( " + r.sql() + " ) mkt_page_count";
 			pager.setTotalRows(executeWithTiming(countSql, r.sps(), () -> namedParameterJdbcTemplate.queryForObject(countSql, r.sps(), COUNT_ROW_MAPPER)));
 			if (pager.getTotalRows() > 0) {
-				String pageSql = SqlBuilder.buildPagerSql(r.sql(), pager);
+				String pageSql = this.sqlBuilder.buildPagerSql(r.sql(), pager);
 				pager.setPageData(executeWithTiming(pageSql, r.sps(), () -> namedParameterJdbcTemplate.query(pageSql, r.sps(), getRowMapper(clazz))));
 			} else {
 				pager.setPageData(new ArrayList<>());
 			}
 		} else {
-			String pageSql = SqlBuilder.buildPagerSql(r.sql(), pager);
+			String pageSql = this.sqlBuilder.buildPagerSql(r.sql(), pager);
 			pager.setPageData(executeWithTiming(pageSql, r.sps(), () -> namedParameterJdbcTemplate.query(pageSql, r.sps(), getRowMapper(clazz))));
 		}
 		return pager;
@@ -421,13 +423,13 @@ public class BaseDaoImpl implements IBaseDao {
 			String countSql = "select count(*) from ( " + r.sql() + " ) mkt_page_count";
 			pager.setTotalRows(executeWithTiming(countSql, r.sps(), () -> namedParameterJdbcTemplate.queryForObject(countSql, r.sps(), COUNT_ROW_MAPPER)));
 			if (pager.getTotalRows() > 0) {
-				String pageSql = SqlBuilder.buildPagerSql(r.sql(), pager);
+				String pageSql = this.sqlBuilder.buildPagerSql(r.sql(), pager);
 				pager.setPageData(executeWithTiming(pageSql, r.sps(), () -> namedParameterJdbcTemplate.query(pageSql, r.sps(), getRowMapper(clazz))));
 			} else {
 				pager.setPageData(new ArrayList<>());
 			}
 		} else {
-			String pageSql = SqlBuilder.buildPagerSql(r.sql(), pager);
+			String pageSql = this.sqlBuilder.buildPagerSql(r.sql(), pager);
 			pager.setPageData(executeWithTiming(pageSql, r.sps(), () -> namedParameterJdbcTemplate.query(pageSql, r.sps(), getRowMapper(clazz))));
 		}
 		return pager;

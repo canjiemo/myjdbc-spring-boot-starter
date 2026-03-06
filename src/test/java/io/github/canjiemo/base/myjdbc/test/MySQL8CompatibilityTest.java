@@ -1,5 +1,6 @@
 package io.github.canjiemo.base.myjdbc.test;
 
+import io.github.canjiemo.base.myjdbc.builder.DbType;
 import io.github.canjiemo.base.myjdbc.builder.SqlBuilder;
 import io.github.canjiemo.base.myjdbc.cache.TableCacheManager;
 import io.github.canjiemo.base.myjdbc.parser.JSqlDynamicSqlParser;
@@ -20,9 +21,11 @@ import static org.junit.jupiter.api.Assertions.*;
 @DisplayName("MySQL 8 兼容性测试")
 class MySQL8CompatibilityTest {
 
+    private static SqlBuilder sqlBuilder;
+
     @BeforeAll
     static void setup() {
-        SqlBuilder.type = 1; // MySQL 模式
+        sqlBuilder = new SqlBuilder(DbType.MYSQL);
         TableCacheManager.initCache("io.github.canjiemo.base.myjdbc.test.entity");
         assertNotNull(TableCacheManager.getDeleteInfoByTableName("user"),
                 "TestUser (@MyTable value=user) 应被成功缓存");
@@ -40,7 +43,7 @@ class MySQL8CompatibilityTest {
     void test01_basicLimitPagination() {
         String sql = "SELECT * FROM user WHERE age > 18";
         Pager<Object> pager = new Pager<>(1, 10);
-        String result = SqlBuilder.buildPagerSql(sql, pager);
+        String result = sqlBuilder.buildPagerSql(sql, pager);
 
         assertTrue(result.contains("limit") || result.contains("LIMIT"), "应包含 LIMIT 关键字");
         assertTrue(result.contains("_mysqltb_"), "MySQL 分页子查询别名应存在");
@@ -57,7 +60,7 @@ class MySQL8CompatibilityTest {
         Pager<Object> pager = new Pager<>(2, 20);
         pager.setSort("createTime");
         pager.setOrder("DESC");
-        String result = SqlBuilder.buildPagerSql(sql, pager);
+        String result = sqlBuilder.buildPagerSql(sql, pager);
 
         assertTrue(result.contains("create_time"), "驼峰 createTime 应转为 create_time");
         assertTrue(result.toLowerCase().contains("desc"), "排序方向 DESC 应保留");
@@ -72,7 +75,7 @@ class MySQL8CompatibilityTest {
     void test03_largeOffsetPagination() {
         String sql = "SELECT * FROM user";
         Pager<Object> pager = new Pager<>(1000, 50);
-        String result = SqlBuilder.buildPagerSql(sql, pager);
+        String result = sqlBuilder.buildPagerSql(sql, pager);
 
         // MySQL 格式: LIMIT 49950,50
         assertTrue(result.contains("49950,50") || result.contains("49950, 50"),

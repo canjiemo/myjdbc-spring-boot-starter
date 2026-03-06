@@ -1,5 +1,7 @@
 package io.github.canjiemo.base.myjdbc.configuration;
 
+import io.github.canjiemo.base.myjdbc.builder.DbType;
+import io.github.canjiemo.base.myjdbc.builder.SqlBuilder;
 import io.github.canjiemo.base.myjdbc.dao.impl.BaseDaoImpl;
 import io.github.canjiemo.base.myjdbc.validation.SchemaValidationRunner;
 import org.junit.jupiter.api.DisplayName;
@@ -21,7 +23,7 @@ class MyJdbcRuntimeSnapshotTest {
         properties.getTenant().setEnabled(true);
         properties.getTenant().setColumn(" org_id ");
 
-        BaseDaoImpl dao = new BaseDaoImpl(properties);
+        BaseDaoImpl dao = new BaseDaoImpl(properties, new SqlBuilder(DbType.MYSQL));
 
         properties.getShowSql().setEnabled(false);
         properties.getTenant().setEnabled(false);
