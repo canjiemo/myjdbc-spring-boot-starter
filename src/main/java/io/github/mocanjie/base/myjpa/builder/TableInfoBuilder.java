@@ -20,6 +20,7 @@ import java.util.*;
 public class TableInfoBuilder implements BeanPostProcessor, Ordered {
 
     private static final Map<Class<?>, TableInfo> tableInfoMap = new HashMap<>();
+    private static final String USER_SAFE_ERROR_MESSAGE = "数据配置异常，请联系管理员";
 
     @PostConstruct
     private void init() {
@@ -61,7 +62,8 @@ public class TableInfoBuilder implements BeanPostProcessor, Ordered {
             try {
                 pkField = aClass.getDeclaredField(annotation.pkField());
             } catch (NoSuchFieldException e) {
-                throw new BusinessException(aClass + "没有找到对应的主键");
+                log.error("实体主键字段配置错误: class={}, pkField={}", aClass.getName(), annotation.pkField(), e);
+                throw new BusinessException(USER_SAFE_ERROR_MESSAGE);
             }
             TableInfo tableInfo = new TableInfo()
                     .setTableName(annotation.value())
@@ -181,7 +183,11 @@ public class TableInfoBuilder implements BeanPostProcessor, Ordered {
 
     public static TableInfo getTableInfo(Class<?> aClass){
         TableInfo tableInfo = tableInfoMap.get(aClass);
-        if(tableInfo==null) throw new BusinessException(aClass+" 缺少@MyTable注解");
+        if (tableInfo == null) {
+            String className = aClass == null ? "null" : aClass.getName();
+            log.error("缺少@MyTable注解或未完成初始化: class={}", className);
+            throw new BusinessException(USER_SAFE_ERROR_MESSAGE);
+        }
         return tableInfo;
     }
 

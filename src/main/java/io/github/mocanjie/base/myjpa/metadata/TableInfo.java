@@ -4,6 +4,7 @@ import io.github.mocanjie.base.mycommon.IdGen;
 import io.github.mocanjie.base.mycommon.exception.BusinessException;
 import lombok.Data;
 import lombok.experimental.Accessors;
+import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.beanutils.ConvertUtils;
 import org.springframework.beans.BeanUtils;
 
@@ -14,7 +15,9 @@ import java.util.Optional;
 
 @Data
 @Accessors(chain = true)
+@Slf4j
 public class TableInfo {
+    private static final String USER_SAFE_ERROR_MESSAGE = "数据配置异常，请联系管理员";
     private String tableName;
     private Field pkField;
     private String pkFieldName;
@@ -29,7 +32,9 @@ public class TableInfo {
     public Field getFieldByName(String fieldName){
         Optional<Field> field = this.fieldList.stream().filter(f -> f.getName().equals(fieldName)).findFirst();
         if(field.isPresent()) return field.get();
-        throw new BusinessException(String.format("没有找到%s变量",fieldName));
+        String className = this.clazz == null ? "unknown" : this.clazz.getName();
+        log.error("未找到实体字段: class={}, field={}", className, fieldName);
+        throw new BusinessException(USER_SAFE_ERROR_MESSAGE);
     }
 
     public void setPkValue(Object obj, Object value){
