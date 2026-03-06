@@ -175,7 +175,7 @@ WHERE u.delete_flag = 0
 <dependency>
     <groupId>io.github.canjiemo</groupId>
     <artifactId>myjdbc-spring-boot-starter</artifactId>
-    <version>1.0.3-jdk21</version>
+    <version>1.0.4-jdk21</version>
 </dependency>
 ```
 
