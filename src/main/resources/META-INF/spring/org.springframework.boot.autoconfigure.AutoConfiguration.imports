@@ -1,2 +1,2 @@
-io.github.mocanjie.base.myjpa.configuration.MyJpaAutoConfiguration
-io.github.mocanjie.base.myjpa.configuration.MyJpaJdbcTemplateAutoConfiguration
+io.github.canjiemo.base.myjdbc.configuration.MyJdbcAutoConfiguration
+io.github.canjiemo.base.myjdbc.configuration.MyJdbcTemplateAutoConfiguration

@@ -1,1 +1,1 @@
-io.github.mocanjie.base.myjpa.processor.MyTableAnnotationProcessor
+io.github.canjiemo.base.myjdbc.processor.MyTableAnnotationProcessor

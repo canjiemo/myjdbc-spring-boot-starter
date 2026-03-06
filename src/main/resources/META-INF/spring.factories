@@ -1,2 +1,2 @@
 org.springframework.boot.autoconfigure.EnableAutoConfiguration=\
-io.github.mocanjie.base.myjpa.configuration.MyJpaAutoConfiguration
+io.github.canjiemo.base.myjdbc.configuration.MyJdbcAutoConfiguration

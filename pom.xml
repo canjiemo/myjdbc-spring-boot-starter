@@ -3,7 +3,7 @@
          xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
     <modelVersion>4.0.0</modelVersion>
     <groupId>io.github.canjiemo</groupId>
-    <artifactId>myjpa-spring-boot-starter</artifactId>
+    <artifactId>myjdbc-spring-boot-starter</artifactId>
     <version>1.0-jdk21</version>
     <packaging>jar</packaging>
     <name>${project.artifactId}-${project.version}</name>
@@ -21,7 +21,7 @@
     <developers>
         <developer>
             <id>io.github.canjiemo</id>
-            <name>mocanjie</name>
+            <name>canjiemo</name>
             <email>canjiemo@gmail.com</email>
             <url>https://github.com/canjiemo</url>
             <timezone>+8</timezone>

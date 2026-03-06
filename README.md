@@ -1,8 +1,8 @@
-# myjpa-spring-boot-starter
+# myjdbc-spring-boot-starter
 
-一个基于 Spring JDBC Template 的轻量级 ORM 框架，提供类似 JPA 的注解驱动开发体验，支持多数据库和智能 SQL 增强。
+一个基于 Spring JDBC Template 的轻量级数据访问增强框架，提供表映射、注解驱动开发体验和智能 SQL 增强。
 
-[![Maven Central](https://img.shields.io/maven-central/v/io.github.mocanjie/myjpa-spring-boot-starter.svg)](https://search.maven.org/artifact/io.github.mocanjie/myjpa-spring-boot-starter)
+[![Maven Central](https://img.shields.io/maven-central/v/io.github.canjiemo/myjdbc-spring-boot-starter.svg)](https://search.maven.org/artifact/io.github.canjiemo/myjdbc-spring-boot-starter)
 [![License](https://img.shields.io/badge/license-Apache%202-blue.svg)](https://www.apache.org/licenses/LICENSE-2.0)
 
 ## ✨ 核心特性
@@ -123,7 +123,7 @@ WHERE u.delete_flag = 0
 ```xml
 <dependency>
     <groupId>io.github.canjiemo</groupId>
-    <artifactId>myjpa-spring-boot-starter</artifactId>
+    <artifactId>myjdbc-spring-boot-starter</artifactId>
     <version>1.0-jdk21</version>
 </dependency>
 ```
@@ -139,7 +139,7 @@ spring:
     driver-class-name: com.mysql.cj.jdbc.Driver
 
 # 可选配置
-myjpa:
+myjdbc:
   show-sql:
     enabled: true        # 开启 SQL 日志（无需手动配置 logging.level）
     sql-level: DEBUG     # org.springframework.jdbc.core.JdbcTemplate 的日志级别
@@ -152,43 +152,43 @@ myjpa:
     column: tenant_id    # 租户字段列名（可自定义，如 org_id）
 ```
 
-### MyJPA 配置总览（与代码同步）
+### MyJDBC 配置总览（与代码同步）
 
-以下配置以 `src/main/java/io/github/mocanjie/base/myjpa/configuration/MyJpaProperties.java` 为准。
-旧配置别名兼容逻辑位于 `src/main/java/io/github/mocanjie/base/myjpa/configuration/MyJpaAutoConfiguration.java`。
+以下配置以 `src/main/java/io/github/canjiemo/base/myjdbc/configuration/MyJdbcProperties.java` 为准。
+旧配置别名兼容逻辑位于 `src/main/java/io/github/canjiemo/base/myjdbc/configuration/MyJdbcAutoConfiguration.java`。
 
 | 配置项 | 默认值 | 说明 |
 |---|---|---|
-| `myjpa.show-sql.enabled` | `false` | 是否由 myjpa 自动设置 JDBC SQL 日志级别 |
-| `myjpa.show-sql.sql-level` | `DEBUG` | `org.springframework.jdbc.core.JdbcTemplate` 日志级别 |
-| `myjpa.show-sql.param-level` | `TRACE` | `org.springframework.jdbc.core.StatementCreatorUtils` 日志级别 |
-| `myjpa.show-sql-time` | `false` | 是否打印每条 SQL 执行耗时（`INFO`） |
-| `myjpa.validate-schema` | `true` | 启动时是否执行数据库表结构校验 |
-| `myjpa.fail-on-validation-error` | `false` | 校验失败时是否中止应用启动 |
-| `myjpa.tenant.enabled` | `false` | 是否开启多租户 SQL 条件注入 |
-| `myjpa.tenant.column` | `tenant_id` | 租户列名 |
+| `myjdbc.show-sql.enabled` | `false` | 是否由 myjdbc 自动设置 JDBC SQL 日志级别 |
+| `myjdbc.show-sql.sql-level` | `DEBUG` | `org.springframework.jdbc.core.JdbcTemplate` 日志级别 |
+| `myjdbc.show-sql.param-level` | `TRACE` | `org.springframework.jdbc.core.StatementCreatorUtils` 日志级别 |
+| `myjdbc.show-sql-time` | `false` | 是否打印每条 SQL 执行耗时（`INFO`） |
+| `myjdbc.validate-schema` | `true` | 启动时是否执行数据库表结构校验 |
+| `myjdbc.fail-on-validation-error` | `false` | 校验失败时是否中止应用启动 |
+| `myjdbc.tenant.enabled` | `false` | 是否开启多租户 SQL 条件注入 |
+| `myjdbc.tenant.column` | `tenant_id` | 租户列名 |
 
 补充说明：
 
 | 项 | 说明 |
 |---|---|
-| JVM 系统参数 | `-Dmyjpa.fail-on-validation-error=true` 仍然可用，Spring 会自动绑定到同名配置项 |
+| JVM 系统参数 | `-Dmyjdbc.fail-on-validation-error=true` 仍然可用，Spring 会自动绑定到同名配置项 |
 
 兼容旧配置（建议迁移到新键名）：
 
 | 旧配置项 | 新配置项 |
 |---|---|
-| `myjpa.showsql` | `myjpa.show-sql.enabled` |
-| `myjpa.showsql.enabled` | `myjpa.show-sql.enabled` |
-| `myjpa.showsql.sql-level` | `myjpa.show-sql.sql-level` |
-| `myjpa.showsql.param-level` | `myjpa.show-sql.param-level` |
+| `myjdbc.showsql` | `myjdbc.show-sql.enabled` |
+| `myjdbc.showsql.enabled` | `myjdbc.show-sql.enabled` |
+| `myjdbc.showsql.sql-level` | `myjdbc.show-sql.sql-level` |
+| `myjdbc.showsql.param-level` | `myjdbc.show-sql.param-level` |
 
 ### 配置变更后如何同步 README
 
-每次涉及 `myjpa.*` 配置变更，按下面步骤同步：
+每次涉及 `myjdbc.*` 配置变更，按下面步骤同步：
 
-1. 修改代码配置源（当前主配置模型在 `MyJpaProperties`）。
-2. 同步更新本节「MyJPA 配置总览（与代码同步）」表格。
+1. 修改代码配置源（当前主配置模型在 `MyJdbcProperties`）。
+2. 同步更新本节「MyJDBC 配置总览（与代码同步）」表格。
 3. 若引入兼容别名，更新「兼容旧配置」映射表。
 4. 至少补一个测试，覆盖新配置默认值或行为分支。
 5. PR 描述中附上“新增/变更配置项”清单，便于发布说明复用。
@@ -200,9 +200,9 @@ myjpa:
 2. 实现 `MyTableEntity` 接口
 
 ```java
-import io.github.mocanjie.base.myjpa.MyTableEntity;
-import io.github.mocanjie.base.myjpa.annotation.MyTable;
-import io.github.mocanjie.base.myjpa.annotation.MyField;
+import io.github.canjiemo.base.myjdbc.MyTableEntity;
+import io.github.canjiemo.base.myjdbc.annotation.MyTable;
+import io.github.canjiemo.base.myjdbc.annotation.MyField;
 
 @MyTable(
     value      = "sys_user",      // 表名（必填）
@@ -485,14 +485,14 @@ List<UserVO> userWithRoles = queryListForSql(
 
 ### 多租户隔离（可选）
 
-> 默认**关闭**，需显式配置 `myjpa.tenant.enabled=true` 开启。
+> 默认**关闭**，需显式配置 `myjdbc.tenant.enabled=true` 开启。
 
 #### 快速接入
 
 **第一步：开启配置**
 
 ```yaml
-myjpa:
+myjdbc:
   tenant:
     enabled: true
     column: tenant_id  # 与数据库实际列名一致
@@ -608,7 +608,7 @@ error: [@MyTable 规范] com.example.UserPO 实现了 MyTableEntity 接口但未
 ## 🏗️ 架构设计
 
 ```
-MyJpaAutoConfiguration（自动配置）
+MyJdbcAutoConfiguration（自动配置）
     ↓
 TableInfoBuilder（元数据构建 + APT 规范校验）
     ↓
@@ -672,9 +672,9 @@ JAVA_HOME=... mvn clean deploy -P release
 
 ## 👥 作者
 
-- **mocanjie** - [GitHub](https://github.com/mocanjie)
+- **canjiemo** - [GitHub](https://github.com/canjiemo)
 
 ## 🔗 相关链接
 
-- [GitHub 仓库](https://github.com/mocanjie/myjpa-spring-boot-starter)
-- [问题反馈](https://github.com/mocanjie/myjpa-spring-boot-starter/issues)
+- [GitHub 仓库](https://github.com/canjiemo/myjdbc-spring-boot-starter)
+- [问题反馈](https://github.com/canjiemo/myjdbc-spring-boot-starter/issues)

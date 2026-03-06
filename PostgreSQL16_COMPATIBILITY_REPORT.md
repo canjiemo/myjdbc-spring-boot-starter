@@ -1,6 +1,6 @@
 # PostgreSQL 16 兼容性测试报告
 
-**项目**: myjpa-spring-boot-starter
+**项目**: myjdbc-spring-boot-starter
 **测试日期**: 2026-02-27
 **测试环境**: JDK 21 / Spring Boot 3.2.0 / JSqlParser 5.3
 **测试范围**: PostgreSQL 16 全面兼容性评估 + 自动逻辑删除条件注入验证
@@ -426,11 +426,11 @@ WHERE u.delete_flag = 0
 ## 附录
 
 ### A. 测试代码位置
-- 测试类: `src/test/java/io/github/mocanjie/base/myjpa/test/PostgreSQL16CompatibilityTest.java`
-- 测试实体: `src/test/java/io/github/mocanjie/base/myjpa/test/entity/TestUser.java`
-- 测试实体: `src/test/java/io/github/mocanjie/base/myjpa/test/entity/TestRole.java`
-- SQL 解析器: `src/main/java/io/github/mocanjie/base/myjpa/parser/JSqlDynamicSqlParser.java`
-- SQL 构建器: `src/main/java/io/github/mocanjie/base/myjpa/builder/SqlBuilder.java`
+- 测试类: `src/test/java/io/github/canjiemo/base/myjdbc/test/PostgreSQL16CompatibilityTest.java`
+- 测试实体: `src/test/java/io/github/canjiemo/base/myjdbc/test/entity/TestUser.java`
+- 测试实体: `src/test/java/io/github/canjiemo/base/myjdbc/test/entity/TestRole.java`
+- SQL 解析器: `src/main/java/io/github/canjiemo/base/myjdbc/parser/JSqlDynamicSqlParser.java`
+- SQL 构建器: `src/main/java/io/github/canjiemo/base/myjdbc/builder/SqlBuilder.java`
 
 ### B. 运行测试命令
 ```bash
@@ -452,7 +452,7 @@ spring:
     password: password
     driver-class-name: org.postgresql.Driver
 
-myjpa:
+myjdbc:
   showsql: true
 ```
 
@@ -465,8 +465,8 @@ myjpa:
 </dependency>
 
 <dependency>
-    <groupId>io.github.mocanjie</groupId>
-    <artifactId>myjpa-spring-boot-starter</artifactId>
+    <groupId>io.github.canjiemo</groupId>
+    <artifactId>myjdbc-spring-boot-starter</artifactId>
     <version>spring3</version>
 </dependency>
 ```
