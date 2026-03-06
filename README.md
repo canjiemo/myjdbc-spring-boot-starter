@@ -128,8 +128,49 @@ WHERE u.delete_flag = 0
 </dependency>
 ```
 
-### 配置数据源
+### 从 myjpa 迁移到 myjdbc
 
+如果你之前使用的是 `myjpa-spring-boot-starter`，升级到当前版本时需要同步调整以下内容：
+
+| 迁移项 | 旧值 | 新值 |
+|---|---|---|
+| Maven `artifactId` | `myjpa-spring-boot-starter` | `myjdbc-spring-boot-starter` |
+| 配置前缀 | `myjpa.*` | `myjdbc.*` |
+| 主包名 | `io.github.mocanjie.base.myjpa` | `io.github.canjiemo.base.myjdbc` |
+| 自动配置类 | `MyJpaAutoConfiguration` | `MyJdbcAutoConfiguration` |
+| 配置模型类 | `MyJpaProperties` | `MyJdbcProperties` |
+| 错误码前缀 | `MYJPA-*` | `MYJDBC-*` |
+
+迁移示例：
+
+```yaml
+# before
+myjpa:
+  show-sql:
+    enabled: true
+
+# after
+myjdbc:
+  show-sql:
+    enabled: true
+```
+
+```java
+// before
+import io.github.mocanjie.base.myjpa.MyTableEntity;
+import io.github.mocanjie.base.myjpa.annotation.MyTable;
+
+// after
+import io.github.canjiemo.base.myjdbc.MyTableEntity;
+import io.github.canjiemo.base.myjdbc.annotation.MyTable;
+```
+
+说明：
+
+1. `mycommon` 依赖的 Java 包名仍保持原样，不需要随本项目重命名一起修改。
+2. 旧版本应用升级后，需要统一替换代码 import、配置文件键名和 Maven 依赖坐标。
+
+### 配置数据源
 ```yaml
 spring:
   datasource:
