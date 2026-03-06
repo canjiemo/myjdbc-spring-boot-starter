@@ -474,9 +474,9 @@ public class DatabaseSchemaValidator implements Ordered {
     private void logValidationSummary(ValidationResult result) {
         log.info("数据库模式验证完成：");
         log.info("  - 验证表数: {}", result.getTotalTables());
-        log.info("  - 成功: {}", result.getSuccessCount());
-        log.info("  - 警告: {}", result.getWarningCount());
-        log.info("  - 错误: {}", result.getErrorCount());
+        log.info("  - 成功: {}", result.getSuccessTableCount());
+        log.info("  - 警告: {}", result.getWarningTableCount());
+        log.info("  - 错误: {}", result.getErrorTableCount());
         
         if (result.hasErrors()) {
             log.error("发现配置错误，建议检查@MyTable注解配置：");
@@ -533,7 +533,7 @@ public class DatabaseSchemaValidator implements Ordered {
         public int getErrorCount() {
             return errors.values().stream().mapToInt(List::size).sum();
         }
-        
+
         public int getWarningCount() {
             return warnings.values().stream().mapToInt(List::size).sum();
         }
@@ -541,13 +541,25 @@ public class DatabaseSchemaValidator implements Ordered {
         public int getSuccessCount() {
             return successes.values().stream().mapToInt(List::size).sum();
         }
-        
+
+        public int getErrorTableCount() {
+            return errors.size();
+        }
+
+        public int getWarningTableCount() {
+            return (int) warnings.keySet().stream()
+                    .filter(tableName -> !errors.containsKey(tableName))
+                    .count();
+        }
+
+        public int getSuccessTableCount() {
+            return (int) getAllTables().stream()
+                    .filter(tableName -> !errors.containsKey(tableName) && !warnings.containsKey(tableName))
+                    .count();
+        }
+
         public int getTotalTables() {
-            Set<String> allTables = new HashSet<>();
-            allTables.addAll(errors.keySet());
-            allTables.addAll(warnings.keySet());
-            allTables.addAll(successes.keySet());
-            return allTables.size();
+            return getAllTables().size();
         }
         
         public Map<String, List<String>> getErrors() {
@@ -560,6 +572,14 @@ public class DatabaseSchemaValidator implements Ordered {
         
         public Map<String, List<String>> getSuccesses() {
             return new HashMap<>(successes);
+        }
+
+        private Set<String> getAllTables() {
+            Set<String> allTables = new HashSet<>();
+            allTables.addAll(errors.keySet());
+            allTables.addAll(warnings.keySet());
+            allTables.addAll(successes.keySet());
+            return allTables;
         }
     }
 }

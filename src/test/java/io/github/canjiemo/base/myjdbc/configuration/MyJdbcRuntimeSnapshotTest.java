@@ -17,16 +17,17 @@ class MyJdbcRuntimeSnapshotTest {
     @DisplayName("BaseDaoImpl 应在构造时缓存高频配置")
     void baseDaoImplShouldSnapshotHotPathConfig() throws Exception {
         MyJdbcProperties properties = new MyJdbcProperties();
-        properties.setShowSqlTime(true);
+        properties.getShowSql().setEnabled(true);
         properties.getTenant().setEnabled(true);
         properties.getTenant().setColumn(" org_id ");
 
         BaseDaoImpl dao = new BaseDaoImpl(properties);
 
-        properties.setShowSqlTime(false);
+        properties.getShowSql().setEnabled(false);
         properties.getTenant().setEnabled(false);
         properties.getTenant().setColumn("tenant_id");
 
+        assertTrue((Boolean) readField(dao, "showSqlEnabled"));
         assertTrue((Boolean) readField(dao, "showSqlTimeEnabled"));
         assertTrue((Boolean) readField(dao, "tenantIsolationEnabled"));
         assertEquals("org_id", readField(dao, "tenantColumn"));

@@ -50,6 +50,26 @@ class DatabaseSchemaValidatorTest {
                 "列信息校验应改为参数化 schema/table 查询");
     }
 
+    @Test
+    @DisplayName("校验汇总统计应按表维度而不是消息条数")
+    void validationSummaryShouldCountTablesBySeverity() {
+        DatabaseSchemaValidator.ValidationResult result = new DatabaseSchemaValidator.ValidationResult();
+        result.addSuccess("sys_user", "删除标记字段验证通过");
+        result.addSuccess("sys_user", "租户字段存在");
+        result.addWarning("sys_role", "删除标记字段不存在");
+        result.addSuccess("sys_role", "租户字段存在");
+        result.addError("sys_menu", "表不存在");
+
+        assertEquals(3, result.getTotalTables());
+        assertEquals(1, result.getSuccessTableCount());
+        assertEquals(1, result.getWarningTableCount());
+        assertEquals(1, result.getErrorTableCount());
+
+        assertEquals(3, result.getSuccessCount());
+        assertEquals(1, result.getWarningCount());
+        assertEquals(1, result.getErrorCount());
+    }
+
     private static DataSource postgresDataSource(String schema, String catalog) {
         DatabaseMetaData metaData = (DatabaseMetaData) Proxy.newProxyInstance(
                 DatabaseMetaData.class.getClassLoader(),

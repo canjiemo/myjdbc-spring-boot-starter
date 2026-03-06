@@ -18,8 +18,6 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnClass;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
-import org.springframework.boot.logging.LogLevel;
-import org.springframework.boot.logging.LoggingSystem;
 import org.springframework.context.annotation.Bean;
 import org.springframework.core.Ordered;
 import org.springframework.core.annotation.Order;
@@ -98,22 +96,6 @@ public class MyJdbcAutoConfiguration {
     void logInit(){
         applyLegacyPropertyAliases();
         normalizeProperties();
-        // 通过 myjdbc 配置控制 SQL 日志级别（由应用方决定是否开启）
-        if (properties.getShowSql().isEnabled()) {
-            applySqlLogLevels();
-        }
-    }
-
-    private void applySqlLogLevels() {
-        try {
-            LoggingSystem loggingSystem = LoggingSystem.get(getClass().getClassLoader());
-            LogLevel sqlLevel = LogLevel.valueOf(properties.getShowSql().getSqlLevel().trim().toUpperCase());
-            LogLevel paramLevel = LogLevel.valueOf(properties.getShowSql().getParamLevel().trim().toUpperCase());
-            loggingSystem.setLogLevel("org.springframework.jdbc.core.JdbcTemplate", sqlLevel);
-            loggingSystem.setLogLevel("org.springframework.jdbc.core.StatementCreatorUtils", paramLevel);
-        } catch (Exception e) {
-            log.warn("应用 myjdbc.show-sql 日志级别失败: {}", e.getMessage());
-        }
     }
 
     private void applyLegacyPropertyAliases() {
@@ -127,25 +109,9 @@ public class MyJdbcAutoConfiguration {
                 log.debug("检测到旧配置 myjdbc.showsql*，已映射到 myjdbc.show-sql.enabled");
             }
         }
-
-        if (!environment.containsProperty("myjdbc.show-sql.sql-level")) {
-            String legacySqlLevel = environment.getProperty("myjdbc.showsql.sql-level");
-            if (legacySqlLevel != null && !legacySqlLevel.isBlank()) {
-                properties.getShowSql().setSqlLevel(legacySqlLevel.trim());
-            }
-        }
-
-        if (!environment.containsProperty("myjdbc.show-sql.param-level")) {
-            String legacyParamLevel = environment.getProperty("myjdbc.showsql.param-level");
-            if (legacyParamLevel != null && !legacyParamLevel.isBlank()) {
-                properties.getShowSql().setParamLevel(legacyParamLevel.trim());
-            }
-        }
     }
 
     private void normalizeProperties() {
-        properties.getShowSql().setSqlLevel(normalizeText(properties.getShowSql().getSqlLevel(), "DEBUG"));
-        properties.getShowSql().setParamLevel(normalizeText(properties.getShowSql().getParamLevel(), "TRACE"));
         properties.getTenant().setColumn(normalizeText(properties.getTenant().getColumn(), "tenant_id"));
     }
 

@@ -41,17 +41,13 @@ class MyJdbcAutoConfigurationTest {
         properties.getTenant().setColumn(" org_id ");
         StandardEnvironment environment = new StandardEnvironment();
         Map<String, Object> values = new HashMap<>();
-        values.put("myjdbc.showsql", "false");
-        values.put("myjdbc.showsql.sql-level", " info ");
-        values.put("myjdbc.showsql.param-level", " trace ");
+        values.put("myjdbc.showsql", "true");
         environment.getPropertySources().addFirst(new MapPropertySource("test", values));
 
         MyJdbcAutoConfiguration autoConfiguration = new MyJdbcAutoConfiguration(properties, environment);
         autoConfiguration.logInit();
 
-        assertFalse(properties.getShowSql().isEnabled());
-        assertEquals("info", properties.getShowSql().getSqlLevel());
-        assertEquals("trace", properties.getShowSql().getParamLevel());
+        assertTrue(properties.getShowSql().isEnabled());
         assertEquals("org_id", properties.getTenant().getColumn());
     }
 

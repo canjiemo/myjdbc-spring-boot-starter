@@ -186,15 +186,21 @@ spring:
 # 可选配置
 myjdbc:
   show-sql:
-    enabled: true        # 开启 SQL 日志（无需手动配置 logging.level）
-    sql-level: DEBUG     # org.springframework.jdbc.core.JdbcTemplate 的日志级别
-    param-level: TRACE   # org.springframework.jdbc.core.StatementCreatorUtils 的日志级别
-  show-sql-time: false   # 打印每条 SQL 的实际执行耗时，INFO 级别输出（默认 false）
+    enabled: true        # 开启 MyJDBC SQL 调试日志（Preparing / Parameters / 耗时）
+  show-sql-time: false   # 兼容旧配置：当 show-sql.enabled=false 时，仅打印耗时
   validate-schema: true  # 启动时校验表结构
   fail-on-validation-error: false # 表结构校验失败时是否阻断启动
   tenant:
     enabled: false       # 多租户隔离开关（默认关闭，按需开启）
     column: tenant_id    # 租户字段列名（可自定义，如 org_id）
+```
+
+开启 `myjdbc.show-sql.enabled=true` 后，日志效果类似：
+
+```text
+[MyJDBC] Preparing: SELECT * FROM sys_user WHERE id = ? AND tenant_id = ?
+[MyJDBC] Parameters: 1(Long), 1001(Long)
+[MyJDBC] 8ms ← SELECT * FROM sys_user WHERE id = :id AND tenant_id = :myjdbcTenantId
 ```
 
 ### MyJDBC 配置总览（与代码同步）
@@ -204,10 +210,8 @@ myjdbc:
 
 | 配置项 | 默认值 | 说明 |
 |---|---|---|
-| `myjdbc.show-sql.enabled` | `false` | 是否由 myjdbc 自动设置 JDBC SQL 日志级别 |
-| `myjdbc.show-sql.sql-level` | `DEBUG` | `org.springframework.jdbc.core.JdbcTemplate` 日志级别 |
-| `myjdbc.show-sql.param-level` | `TRACE` | `org.springframework.jdbc.core.StatementCreatorUtils` 日志级别 |
-| `myjdbc.show-sql-time` | `false` | 是否打印每条 SQL 执行耗时（`INFO`） |
+| `myjdbc.show-sql.enabled` | `false` | 是否打印 MyJDBC SQL 调试日志（`Preparing / Parameters / 耗时`） |
+| `myjdbc.show-sql-time` | `false` | 兼容旧配置；当 `show-sql.enabled=false` 时，可单独开启耗时日志 |
 | `myjdbc.validate-schema` | `true` | 启动时是否执行数据库表结构校验 |
 | `myjdbc.fail-on-validation-error` | `false` | 校验失败时是否中止应用启动 |
 | `myjdbc.tenant.enabled` | `false` | 是否开启多租户 SQL 条件注入 |
@@ -225,8 +229,6 @@ myjdbc:
 |---|---|
 | `myjdbc.showsql` | `myjdbc.show-sql.enabled` |
 | `myjdbc.showsql.enabled` | `myjdbc.show-sql.enabled` |
-| `myjdbc.showsql.sql-level` | `myjdbc.show-sql.sql-level` |
-| `myjdbc.showsql.param-level` | `myjdbc.show-sql.param-level` |
 
 ### 配置变更后如何同步 README
 

@@ -23,6 +23,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.RowMapper;
+import org.springframework.jdbc.core.SqlParameterValue;
 import org.springframework.jdbc.core.SingleColumnRowMapper;
 import org.springframework.jdbc.core.namedparam.*;
 import org.springframework.jdbc.support.GeneratedKeyHolder;
@@ -38,8 +39,11 @@ public class BaseDaoImpl implements IBaseDao {
 
 	protected static Logger log = LoggerFactory.getLogger(BaseDaoImpl.class);
 	private static final SingleColumnRowMapper<Long> COUNT_ROW_MAPPER = new SingleColumnRowMapper<>(Long.class);
+	private static final int MAX_LOG_PARAM_LENGTH = 128;
 	private final Map<Class<?>, RowMapper<?>> rowMapperCache = new ConcurrentHashMap<>();
+	private final Map<String, ParsedSql> parsedSqlCache = new ConcurrentHashMap<>();
 	// 高频 DAO 路径只读这些快照字段，避免每次执行 SQL 都走可变配置对象访问。
+	private final boolean showSqlEnabled;
 	private final boolean showSqlTimeEnabled;
 	private final boolean tenantIsolationEnabled;
 	private final String tenantColumn;
@@ -47,7 +51,8 @@ public class BaseDaoImpl implements IBaseDao {
 	private final String tenantFieldName;
 
 	public BaseDaoImpl(MyJdbcProperties properties) {
-		this.showSqlTimeEnabled = properties != null && properties.isShowSqlTime();
+		this.showSqlEnabled = properties != null && properties.getShowSql().isEnabled();
+		this.showSqlTimeEnabled = this.showSqlEnabled || (properties != null && properties.isShowSqlTime());
 		this.tenantIsolationEnabled = properties != null && properties.getTenant().isEnabled();
 		this.tenantColumn = resolveTenantColumn(properties);
 		this.tenantColumnLowerCase = this.tenantColumn.toLowerCase(Locale.ROOT);
@@ -55,12 +60,143 @@ public class BaseDaoImpl implements IBaseDao {
 	}
 
 	private <T> T executeWithTiming(String sql, java.util.function.Supplier<T> operation) {
-		if (!showSqlTimeEnabled) return operation.get();
-		long start = System.currentTimeMillis();
-		T result = operation.get();
-		log.info("[MyJDBC] {}ms ← {}", System.currentTimeMillis() - start, sql);
-		return result;
+		return executeWithTiming(sql, (SqlParameterSource) null, operation);
 	}
+
+	private <T> T executeWithTiming(String sql, @Nullable SqlParameterSource sps, java.util.function.Supplier<T> operation) {
+		if (!showSqlEnabled && !showSqlTimeEnabled) return operation.get();
+		logSqlPreview(sql, sps);
+		long start = showSqlTimeEnabled ? System.currentTimeMillis() : 0L;
+		try {
+			return operation.get();
+		} finally {
+			logElapsed(sql, start);
+		}
+	}
+
+	private <T> T executeWithTiming(String sql, @Nullable SqlParameterSource[] batchParams, java.util.function.Supplier<T> operation) {
+		if (!showSqlEnabled && !showSqlTimeEnabled) return operation.get();
+		logBatchSqlPreview(sql, batchParams);
+		long start = showSqlTimeEnabled ? System.currentTimeMillis() : 0L;
+		try {
+			return operation.get();
+		} finally {
+			logElapsed(sql, start);
+		}
+	}
+
+	private void logSqlPreview(String sql, @Nullable SqlParameterSource sps) {
+		if (!showSqlEnabled || !log.isInfoEnabled()) {
+			return;
+		}
+		try {
+			SqlLogPreview preview = buildSqlLogPreviewCached(sql, sps);
+			log.info("[MyJDBC] Preparing: {}", preview.preparedSql());
+			if (!preview.parameters().isBlank()) {
+				log.info("[MyJDBC] Parameters: {}", preview.parameters());
+			}
+		} catch (Exception e) {
+			log.debug("格式化 SQL 日志失败，回退为原始 SQL: {}", e.getMessage());
+			log.info("[MyJDBC] Preparing: {}", sql);
+		}
+	}
+
+	private void logBatchSqlPreview(String sql, @Nullable SqlParameterSource[] batchParams) {
+		if (!showSqlEnabled || !log.isInfoEnabled()) {
+			return;
+		}
+		if (batchParams == null || batchParams.length == 0) {
+			logSqlPreview(sql, (SqlParameterSource) null);
+			return;
+		}
+		try {
+			SqlLogPreview preview = buildSqlLogPreviewCached(sql, batchParams[0]);
+			log.info("[MyJDBC] Preparing(batch x{}): {}", batchParams.length, preview.preparedSql());
+			if (!preview.parameters().isBlank()) {
+				log.info("[MyJDBC] Parameters(first): {}", preview.parameters());
+			}
+		} catch (Exception e) {
+			log.debug("格式化批量 SQL 日志失败，回退为原始 SQL: {}", e.getMessage());
+			log.info("[MyJDBC] Preparing(batch x{}): {}", batchParams.length, sql);
+		}
+	}
+
+	private void logElapsed(String sql, long start) {
+		if (!showSqlTimeEnabled || !log.isInfoEnabled()) {
+			return;
+		}
+		log.info("[MyJDBC] {}ms ← {}", System.currentTimeMillis() - start, sql);
+	}
+
+	private SqlLogPreview buildSqlLogPreviewCached(String sql, @Nullable SqlParameterSource sps) {
+		if (sps == null) {
+			return new SqlLogPreview(sql, "");
+		}
+		ParsedSql parsedSql = parsedSqlCache.computeIfAbsent(sql, NamedParameterUtils::parseSqlStatement);
+		return buildSqlLogPreview(parsedSql, sps);
+	}
+
+	static SqlLogPreview buildSqlLogPreview(String sql, @Nullable SqlParameterSource sps) {
+		if (sps == null) {
+			return new SqlLogPreview(sql, "");
+		}
+		return buildSqlLogPreview(NamedParameterUtils.parseSqlStatement(sql), sps);
+	}
+
+	private static SqlLogPreview buildSqlLogPreview(ParsedSql parsedSql, SqlParameterSource sps) {
+		String preparedSql = NamedParameterUtils.substituteNamedParameters(parsedSql, sps);
+		Object[] values = NamedParameterUtils.buildValueArray(parsedSql, sps, null);
+		return new SqlLogPreview(preparedSql, formatParameters(values));
+	}
+
+	private static String formatParameters(Object[] values) {
+		if (values == null || values.length == 0) {
+			return "";
+		}
+		List<String> formatted = new ArrayList<>(values.length);
+		for (Object value : values) {
+			appendFormattedParameter(formatted, value);
+		}
+		return String.join(", ", formatted);
+	}
+
+	private static void appendFormattedParameter(List<String> formatted, Object value) {
+		Object actualValue = unwrapParameterValue(value);
+		if (actualValue instanceof Collection<?> collection) {
+			for (Object item : collection) {
+				formatted.add(formatParameter(item));
+			}
+			return;
+		}
+		if (actualValue instanceof Object[] array) {
+			for (Object item : array) {
+				formatted.add(formatParameter(item));
+			}
+			return;
+		}
+		formatted.add(formatParameter(actualValue));
+	}
+
+	private static Object unwrapParameterValue(Object value) {
+		return value instanceof SqlParameterValue sqlParameterValue ? sqlParameterValue.getValue() : value;
+	}
+
+	private static String formatParameter(Object value) {
+		Object actualValue = unwrapParameterValue(value);
+		if (actualValue == null) {
+			return "null";
+		}
+		if (actualValue instanceof byte[] bytes) {
+			return "[bytes:" + bytes.length + "](byte[])";
+		}
+		String text = String.valueOf(actualValue);
+		if (text.length() > MAX_LOG_PARAM_LENGTH) {
+			text = text.substring(0, MAX_LOG_PARAM_LENGTH) + "...";
+		}
+		return text + "(" + actualValue.getClass().getSimpleName() + ")";
+	}
+
+	record SqlLogPreview(String preparedSql, String parameters) {}
 
 	public boolean isWrapClass(Class<?> clz) {
 		return BeanUtils.isSimpleValueType(clz) || clz == java.sql.Date.class;
@@ -130,7 +266,7 @@ public class BaseDaoImpl implements IBaseDao {
 	private <T> T querySingleInternal(String sql, SqlParameterSource sps, Class<T> clazz) {
 		var r = applyConditions(sql, sps);
 		RowMapper<T> rowMapper = getRowMapper(clazz);
-		return executeWithTiming(r.sql(), () ->
+		return executeWithTiming(r.sql(), r.sps(), () ->
 				namedParameterJdbcTemplate.query(r.sql(), r.sps(), rs -> rs.next() ? rowMapper.mapRow(rs, 0) : null));
 	}
 
@@ -194,7 +330,7 @@ public class BaseDaoImpl implements IBaseDao {
 				? new EmptySqlParameterSource()
 				: new BeanPropertySqlParameterSource(param);
 		var r = applyConditions(sql, sps);
-		return executeWithTiming(r.sql(), () -> namedParameterJdbcTemplate.query(r.sql(), r.sps(), getRowMapper(clazz)));
+		return executeWithTiming(r.sql(), r.sps(), () -> namedParameterJdbcTemplate.query(r.sql(), r.sps(), getRowMapper(clazz)));
 	}
 
 	@Override
@@ -203,7 +339,7 @@ public class BaseDaoImpl implements IBaseDao {
 				? new EmptySqlParameterSource()
 				: new MapSqlParameterSource(param);
 		var r = applyConditions(sql, sps);
-		return executeWithTiming(r.sql(), () -> namedParameterJdbcTemplate.query(r.sql(), r.sps(), getRowMapper(clazz)));
+		return executeWithTiming(r.sql(), r.sps(), () -> namedParameterJdbcTemplate.query(r.sql(), r.sps(), getRowMapper(clazz)));
 	}
 
 	@Override
@@ -230,16 +366,16 @@ public class BaseDaoImpl implements IBaseDao {
 		var r = applyConditions(sql, sps);
 		if (!pager.getIgnoreCount()) {
 			String countSql = "select count(*) from ( " + r.sql() + " ) mkt_page_count";
-			pager.setTotalRows(executeWithTiming(countSql, () -> namedParameterJdbcTemplate.queryForObject(countSql, r.sps(), COUNT_ROW_MAPPER)));
+			pager.setTotalRows(executeWithTiming(countSql, r.sps(), () -> namedParameterJdbcTemplate.queryForObject(countSql, r.sps(), COUNT_ROW_MAPPER)));
 			if (pager.getTotalRows() > 0) {
 				String pageSql = SqlBuilder.buildPagerSql(r.sql(), pager);
-				pager.setPageData(executeWithTiming(pageSql, () -> namedParameterJdbcTemplate.query(pageSql, r.sps(), getRowMapper(clazz))));
+				pager.setPageData(executeWithTiming(pageSql, r.sps(), () -> namedParameterJdbcTemplate.query(pageSql, r.sps(), getRowMapper(clazz))));
 			} else {
 				pager.setPageData(new ArrayList<>());
 			}
 		} else {
 			String pageSql = SqlBuilder.buildPagerSql(r.sql(), pager);
-			pager.setPageData(executeWithTiming(pageSql, () -> namedParameterJdbcTemplate.query(pageSql, r.sps(), getRowMapper(clazz))));
+			pager.setPageData(executeWithTiming(pageSql, r.sps(), () -> namedParameterJdbcTemplate.query(pageSql, r.sps(), getRowMapper(clazz))));
 		}
 		return pager;
 	}
@@ -252,16 +388,16 @@ public class BaseDaoImpl implements IBaseDao {
 		var r = applyConditions(sql, sps);
 		if (!pager.getIgnoreCount()) {
 			String countSql = "select count(*) from ( " + r.sql() + " ) mkt_page_count";
-			pager.setTotalRows(executeWithTiming(countSql, () -> namedParameterJdbcTemplate.queryForObject(countSql, r.sps(), COUNT_ROW_MAPPER)));
+			pager.setTotalRows(executeWithTiming(countSql, r.sps(), () -> namedParameterJdbcTemplate.queryForObject(countSql, r.sps(), COUNT_ROW_MAPPER)));
 			if (pager.getTotalRows() > 0) {
 				String pageSql = SqlBuilder.buildPagerSql(r.sql(), pager);
-				pager.setPageData(executeWithTiming(pageSql, () -> namedParameterJdbcTemplate.query(pageSql, r.sps(), getRowMapper(clazz))));
+				pager.setPageData(executeWithTiming(pageSql, r.sps(), () -> namedParameterJdbcTemplate.query(pageSql, r.sps(), getRowMapper(clazz))));
 			} else {
 				pager.setPageData(new ArrayList<>());
 			}
 		} else {
 			String pageSql = SqlBuilder.buildPagerSql(r.sql(), pager);
-			pager.setPageData(executeWithTiming(pageSql, () -> namedParameterJdbcTemplate.query(pageSql, r.sps(), getRowMapper(clazz))));
+			pager.setPageData(executeWithTiming(pageSql, r.sps(), () -> namedParameterJdbcTemplate.query(pageSql, r.sps(), getRowMapper(clazz))));
 		}
 		return pager;
 	}
@@ -294,16 +430,16 @@ public class BaseDaoImpl implements IBaseDao {
 			final String fSql = sql;
 			final SqlParameterSource fPs = paramSource;
 			if (autoCreateId) {
-				executeWithTiming(fSql, () -> namedParameterJdbcTemplate.update(fSql, fPs));
+				executeWithTiming(fSql, fPs, () -> namedParameterJdbcTemplate.update(fSql, fPs));
 				return (Serializable) tableInfo.getPkValue(po);
 			} else {
 				Object pkValue = tableInfo.getPkValue(po);
 				if (pkValue != null) {
-					executeWithTiming(fSql, () -> namedParameterJdbcTemplate.update(fSql, fPs));
+					executeWithTiming(fSql, fPs, () -> namedParameterJdbcTemplate.update(fSql, fPs));
 					return (Serializable) pkValue;
 				}
 				KeyHolder holder = new GeneratedKeyHolder();
-				executeWithTiming(fSql, () -> namedParameterJdbcTemplate.update(fSql, fPs, holder));
+				executeWithTiming(fSql, fPs, () -> namedParameterJdbcTemplate.update(fSql, fPs, holder));
 				long id = holder.getKey().longValue();
 				tableInfo.setPkValue(po, id);
 				return id;
@@ -338,7 +474,7 @@ public class BaseDaoImpl implements IBaseDao {
 			String sql = SqlParser.getUpdateSql(tableInfo, po, ignoreNull, forceUpdateFields);
 			SqlParameterSource paramSource = new BeanPropertySqlParameterSource(po);
 			var r = applyWriteConditions(sql, paramSource, tableInfo.getTableName());
-			return executeWithTiming(r.sql(), () -> namedParameterJdbcTemplate.update(r.sql(), r.sps()));
+			return executeWithTiming(r.sql(), r.sps(), () -> namedParameterJdbcTemplate.update(r.sql(), r.sps()));
 		} catch (Exception e) {
 			throw businessError("updatePO", e, MyJdbcErrorCode.DAO_ERROR.userMessage(), po != null ? po.getClass().getName() : "null");
 		}
@@ -351,7 +487,7 @@ public class BaseDaoImpl implements IBaseDao {
 			String sql = SqlParser.getDelByIdSql(tableInfo);
 			MapSqlParameterSource sps = new MapSqlParameterSource(tableInfo.getPkFieldName(), tableInfo.getPkValue(po));
 			var r = applyWriteConditions(sql, sps, tableInfo.getTableName());
-			return executeWithTiming(r.sql(), () -> namedParameterJdbcTemplate.update(r.sql(), r.sps()));
+			return executeWithTiming(r.sql(), r.sps(), () -> namedParameterJdbcTemplate.update(r.sql(), r.sps()));
 		} catch (Exception e) {
 			throw businessError("delPO", e, MyJdbcErrorCode.DAO_ERROR.userMessage(), po != null ? po.getClass().getName() : "null");
 		}
@@ -385,7 +521,7 @@ public class BaseDaoImpl implements IBaseDao {
 			}
 			final String fSql = sql;
 			final SqlParameterSource[] fParams = params;
-			return executeWithTiming(fSql, () -> namedParameterJdbcTemplate.batchUpdate(fSql, fParams)).length;
+			return executeWithTiming(fSql, fParams, () -> namedParameterJdbcTemplate.batchUpdate(fSql, fParams)).length;
 		} catch (Exception e) {
 			throw businessError("delByIds", e, MyJdbcErrorCode.DAO_ERROR.userMessage(), clazz != null ? clazz.getName() : "null",
 					id == null ? 0 : id.length);
@@ -433,7 +569,7 @@ public class BaseDaoImpl implements IBaseDao {
 
 			final String fSql = sql;
 			final SqlParameterSource[] fParams = params;
-			int[] counts = executeWithTiming(fSql, () -> namedParameterJdbcTemplate.batchUpdate(fSql, fParams));
+			int[] counts = executeWithTiming(fSql, fParams, () -> namedParameterJdbcTemplate.batchUpdate(fSql, fParams));
 			return counts.length;
 		} catch (Exception e) {
 			throw businessError("batchInsertPO", e, MyJdbcErrorCode.DAO_ERROR.userMessage(), pos.get(0).getClass().getName(), pos.size());
