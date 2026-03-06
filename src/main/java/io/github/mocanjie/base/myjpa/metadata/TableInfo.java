@@ -2,6 +2,7 @@ package io.github.mocanjie.base.myjpa.metadata;
 
 import io.github.mocanjie.base.mycommon.IdGen;
 import io.github.mocanjie.base.mycommon.exception.BusinessException;
+import io.github.mocanjie.base.myjpa.error.MyJpaErrorCode;
 import lombok.Data;
 import lombok.experimental.Accessors;
 import lombok.extern.slf4j.Slf4j;
@@ -17,7 +18,6 @@ import java.util.Optional;
 @Accessors(chain = true)
 @Slf4j
 public class TableInfo {
-    private static final String USER_SAFE_ERROR_MESSAGE = "数据配置异常，请联系管理员";
     private String tableName;
     private Field pkField;
     private String pkFieldName;
@@ -34,7 +34,7 @@ public class TableInfo {
         if(field.isPresent()) return field.get();
         String className = this.clazz == null ? "unknown" : this.clazz.getName();
         log.error("未找到实体字段: class={}, field={}", className, fieldName);
-        throw new BusinessException(USER_SAFE_ERROR_MESSAGE);
+        throw new BusinessException(MyJpaErrorCode.CONFIG_ERROR.userMessage());
     }
 
     public void setPkValue(Object obj, Object value){

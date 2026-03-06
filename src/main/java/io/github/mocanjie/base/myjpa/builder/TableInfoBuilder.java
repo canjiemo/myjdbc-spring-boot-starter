@@ -3,6 +3,7 @@ package io.github.mocanjie.base.myjpa.builder;
 import io.github.mocanjie.base.mycommon.exception.BusinessException;
 import io.github.mocanjie.base.myjpa.annotation.MyTable;
 import io.github.mocanjie.base.myjpa.cache.TableCacheManager;
+import io.github.mocanjie.base.myjpa.error.MyJpaErrorCode;
 import io.github.mocanjie.base.myjpa.metadata.TableInfo;
 import io.github.mocanjie.base.myjpa.utils.MyReflectionUtils;
 import jakarta.annotation.PostConstruct;
@@ -20,7 +21,7 @@ import java.util.*;
 public class TableInfoBuilder implements BeanPostProcessor, Ordered {
 
     private static final Map<Class<?>, TableInfo> tableInfoMap = new HashMap<>();
-    private static final String USER_SAFE_ERROR_MESSAGE = "数据配置异常，请联系管理员";
+    private static final Set<String> missingTableInfoLogged = java.util.concurrent.ConcurrentHashMap.newKeySet();
 
     @PostConstruct
     private void init() {
@@ -63,7 +64,7 @@ public class TableInfoBuilder implements BeanPostProcessor, Ordered {
                 pkField = aClass.getDeclaredField(annotation.pkField());
             } catch (NoSuchFieldException e) {
                 log.error("实体主键字段配置错误: class={}, pkField={}", aClass.getName(), annotation.pkField(), e);
-                throw new BusinessException(USER_SAFE_ERROR_MESSAGE);
+                throw new BusinessException(MyJpaErrorCode.CONFIG_ERROR.userMessage());
             }
             TableInfo tableInfo = new TableInfo()
                     .setTableName(annotation.value())
@@ -185,8 +186,12 @@ public class TableInfoBuilder implements BeanPostProcessor, Ordered {
         TableInfo tableInfo = tableInfoMap.get(aClass);
         if (tableInfo == null) {
             String className = aClass == null ? "null" : aClass.getName();
-            log.error("缺少@MyTable注解或未完成初始化: class={}", className);
-            throw new BusinessException(USER_SAFE_ERROR_MESSAGE);
+            if (missingTableInfoLogged.add(className)) {
+                log.error("缺少@MyTable注解或未完成初始化: class={}", className);
+            } else {
+                log.debug("重复缺少@MyTable配置: class={}", className);
+            }
+            throw new BusinessException(MyJpaErrorCode.CONFIG_ERROR.userMessage());
         }
         return tableInfo;
     }

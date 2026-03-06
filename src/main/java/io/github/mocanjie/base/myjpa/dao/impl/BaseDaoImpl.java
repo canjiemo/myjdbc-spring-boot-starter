@@ -7,6 +7,7 @@ import io.github.mocanjie.base.myjpa.builder.SqlBuilder;
 import io.github.mocanjie.base.myjpa.builder.TableInfoBuilder;
 import io.github.mocanjie.base.myjpa.cache.TableCacheManager;
 import io.github.mocanjie.base.myjpa.dao.IBaseDao;
+import io.github.mocanjie.base.myjpa.error.MyJpaErrorCode;
 import io.github.mocanjie.base.myjpa.metadata.TableInfo;
 import io.github.mocanjie.base.myjpa.parser.JSqlDynamicSqlParser;
 import io.github.mocanjie.base.myjpa.parser.SqlParser;
@@ -40,7 +41,6 @@ import java.util.concurrent.ConcurrentHashMap;
 public class BaseDaoImpl implements IBaseDao {
 
 	protected static Logger log = LoggerFactory.getLogger(BaseDaoImpl.class);
-	private static final String DEFAULT_BIZ_ERROR_MSG = "系统错误,请联系管理员";
 
 	/** 是否打印 SQL 执行时间，由 MyJpaAutoConfiguration 根据 myjpa.show-sql-time 配置同步 */
 	public static volatile boolean showSqlTime = false;
@@ -305,7 +305,7 @@ public class BaseDaoImpl implements IBaseDao {
 			if (e instanceof DuplicateKeyException) {
 				throw (DuplicateKeyException) e;
 			} else {
-				throw businessError("insertPO", e, DEFAULT_BIZ_ERROR_MSG, po != null ? po.getClass().getName() : "null");
+				throw businessError("insertPO", e, MyJpaErrorCode.DAO_ERROR.userMessage(), po != null ? po.getClass().getName() : "null");
 			}
 		}
 	}
@@ -342,7 +342,7 @@ public class BaseDaoImpl implements IBaseDao {
 			var r = applyWriteConditions(sql, sps, tableInfo.getTableName());
 			return executeWithTiming(r.sql(), () -> namedParameterJdbcTemplate.update(r.sql(), r.sps()));
 		} catch (Exception e) {
-			throw businessError("delPO", e, DEFAULT_BIZ_ERROR_MSG, po != null ? po.getClass().getName() : "null");
+			throw businessError("delPO", e, MyJpaErrorCode.DAO_ERROR.userMessage(), po != null ? po.getClass().getName() : "null");
 		}
 	}
 
@@ -376,7 +376,7 @@ public class BaseDaoImpl implements IBaseDao {
 			final SqlParameterSource[] fParams = params;
 			return executeWithTiming(fSql, () -> namedParameterJdbcTemplate.batchUpdate(fSql, fParams)).length;
 		} catch (Exception e) {
-			throw businessError("delByIds", e, DEFAULT_BIZ_ERROR_MSG, clazz != null ? clazz.getName() : "null",
+			throw businessError("delByIds", e, MyJpaErrorCode.DAO_ERROR.userMessage(), clazz != null ? clazz.getName() : "null",
 					id == null ? 0 : id.length);
 		}
 	}
@@ -427,7 +427,7 @@ public class BaseDaoImpl implements IBaseDao {
 			int[] counts = executeWithTiming(fSql, () -> namedParameterJdbcTemplate.batchUpdate(fSql, fParams));
 			return counts.length;
 		} catch (Exception e) {
-			throw businessError("batchInsertPO", e, DEFAULT_BIZ_ERROR_MSG, pos.get(0).getClass().getName(), pos.size());
+			throw businessError("batchInsertPO", e, MyJpaErrorCode.DAO_ERROR.userMessage(), pos.get(0).getClass().getName(), pos.size());
 		}
 	}
 
