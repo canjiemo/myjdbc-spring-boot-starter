@@ -104,6 +104,56 @@ WHERE u.delete_flag = 0
 - `tenantId = null` 时视为超级管理员，跳过过滤
 - 支持方法级临时跳过
 
+### ✅ SQL 自动改写支持矩阵（已测试覆盖）
+
+以下内容指“当前版本已通过自动化测试验证”的场景，便于团队判断哪些 SQL 可以放心依赖自动改写。
+
+#### 1. 日常业务查询场景
+
+| 类别 | 已验证支持 |
+|---|---|
+| 基础查询 | 单表 `SELECT`、表别名、无 `WHERE` 自动补 `WHERE` |
+| JOIN | `LEFT JOIN`、`INNER JOIN`；主表条件进 `WHERE`，外连接表条件进 `ON` |
+| 子查询 | `IN` / `NOT IN` / `EXISTS` / `NOT EXISTS` 子查询递归注入 |
+| 更复杂子查询 | `SELECT` 列中的标量子查询、`HAVING` 子句子查询、`JOIN ON` 子查询 |
+| 集合查询 | `UNION` / `UNION ALL` 各分支独立改写，外层 `ORDER BY` 保留 |
+| CTE | `WITH` / 普通 CTE 内部基础表递归改写 |
+| 组合改写 | 逻辑删除 + 租户条件单次解析合并注入（`appendConditions` 路径） |
+| 幂等性 | SQL 已手写删除条件 / 租户条件时不会重复注入 |
+| 跳过规则 | 未配置 `@MyTable` 的表、无租户列的表保持原样；`TenantContext.withoutTenant()` 可临时跳过租户 |
+| 租户配置 | 支持自定义租户列名，如 `org_id` |
+
+#### 2. 已验证语法保留能力
+
+这些场景的重点是“JSqlParser 往返后语法不被破坏”，适合复杂报表或数据库特性较多的 SQL：
+
+| 数据库 | 已验证语法保留 |
+|---|---|
+| MySQL 8 | 反引号标识符、`BOOLEAN`/`true/false`、`REGEXP`/`RLIKE`、`WITH`/`WITH RECURSIVE`、窗口函数、`JSON_EXTRACT`、`JSON_UNQUOTE`、`LATERAL JOIN`、复杂 `OR/AND` 括号 |
+| PostgreSQL 16 | 双引号标识符、数组 `&&`、JSONB 操作符与函数、窗口函数、`WITH RECURSIVE`、`DISTINCT ON`、全文搜索、`LATERAL JOIN`、`GROUPING SETS`、聚合 `FILTER`、schema 限定表名、`::` 类型转换、正则操作符 |
+
+#### 3. 非 SELECT 语句说明
+
+- 查询类自动改写只针对 `SELECT`
+- `INSERT` / `UPDATE` / `MERGE` / `INSERT ... RETURNING` 在 parser 层保持原样返回
+- 框架自己的写操作（如 `insertPO` / `updatePO` / `delPO`）走单独的写路径处理，不依赖查询 SQL 改写
+
+#### 4. 工程建议
+
+以下场景不是说一定不支持，而是“当前还没有单独建立稳定回归基线”，建议在核心链路先实测再推广：
+
+- `INSERT ... SELECT`
+- `UPDATE ... FROM`
+- `DELETE ... USING`
+- 多层 `CTE + UNION + 子查询 + 方言函数` 叠加的大报表 SQL
+- 对结果语义要求极高的复杂手写 SQL
+
+对于这类 SQL，建议：
+
+- 先写回归测试再上线
+- 必要时使用 `TenantContext.withoutTenant()`，由业务手工控制租户条件
+- 尽量把复杂报表 SQL 与标准 CRUD/列表查询分开治理
+
 ### 📦 零配置包扫描
 - 自动检测主应用包路径
 - 智能扫描 `@MyTable` 注解的实体类
@@ -125,7 +175,7 @@ WHERE u.delete_flag = 0
 <dependency>
     <groupId>io.github.canjiemo</groupId>
     <artifactId>myjdbc-spring-boot-starter</artifactId>
-    <version>1.0.2-jdk21</version>
+    <version>1.0.3-jdk21</version>
 </dependency>
 ```
 

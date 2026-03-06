@@ -39,7 +39,18 @@ final class SqlParserSupport {
     }
 
     static void processSelectTree(Select select, Consumer<PlainSelect> plainSelectProcessor) {
-        if (select instanceof PlainSelect plainSelect) {
+        if (select.getWithItemsList() != null) {
+            for (WithItem withItem : select.getWithItemsList()) {
+                if (withItem.getSelect() != null) {
+                    processSelectTree(withItem.getSelect(), plainSelectProcessor);
+                }
+            }
+        }
+        if (select instanceof ParenthesedSelect parenthesedSelect) {
+            if (parenthesedSelect.getSelect() != null) {
+                processSelectTree(parenthesedSelect.getSelect(), plainSelectProcessor);
+            }
+        } else if (select instanceof PlainSelect plainSelect) {
             plainSelectProcessor.accept(plainSelect);
         } else if (select instanceof SetOperationList setOperationList) {
             for (Select item : setOperationList.getSelects()) {
@@ -58,6 +69,20 @@ final class SqlParserSupport {
         }
         if (plainSelect.getWhere() != null) {
             processNestedSelectsInExpression(plainSelect.getWhere(), selectProcessor);
+        }
+        if (plainSelect.getHaving() != null) {
+            processNestedSelectsInExpression(plainSelect.getHaving(), selectProcessor);
+        }
+        if (plainSelect.getJoins() != null) {
+            for (Join join : plainSelect.getJoins()) {
+                Collection<Expression> onExpressions = join.getOnExpressions();
+                if (onExpressions == null) {
+                    continue;
+                }
+                for (Expression onExpression : onExpressions) {
+                    processNestedSelectsInExpression(onExpression, selectProcessor);
+                }
+            }
         }
     }
 
