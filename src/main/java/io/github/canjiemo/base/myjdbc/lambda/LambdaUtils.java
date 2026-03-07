@@ -1,6 +1,7 @@
 package io.github.canjiemo.base.myjdbc.lambda;
 
 import io.github.canjiemo.base.myjdbc.annotation.MyField;
+import io.github.canjiemo.base.myjdbc.annotation.MyTable;
 import io.github.canjiemo.base.myjdbc.builder.TableInfoBuilder;
 import io.github.canjiemo.base.myjdbc.metadata.TableInfo;
 import io.github.canjiemo.base.myjdbc.utils.CommonUtils;
@@ -39,6 +40,23 @@ public class LambdaUtils {
      */
     public static <T, R> String getColumnName(SFunction<T, R> fn, Class<T> clazz) {
         String fieldName = getFieldName(fn);
+        Field directField = findFieldInHierarchy(clazz, fieldName);
+        if (directField != null) {
+            MyTable myTable = clazz.getAnnotation(MyTable.class);
+            if (myTable != null) {
+                if (fieldName.equals(myTable.pkField())) {
+                    return myTable.pkColumn();
+                }
+                if (fieldName.equals(myTable.delField())) {
+                    return myTable.delColumn();
+                }
+            }
+            MyField myField = directField.getAnnotation(MyField.class);
+            if (myField != null && !myField.value().isEmpty()) {
+                return myField.value();
+            }
+            return CommonUtils.camelCaseToUnderscore(fieldName);
+        }
         try {
             TableInfo tableInfo = TableInfoBuilder.getTableInfo(clazz);
             for (Field field : tableInfo.getFieldList()) {
@@ -54,5 +72,15 @@ public class LambdaUtils {
             // TableInfo 未初始化（如单元测试环境），fallback 到驼峰转下划线
         }
         return CommonUtils.camelCaseToUnderscore(fieldName);
+    }
+
+    private static Field findFieldInHierarchy(Class<?> clazz, String fieldName) {
+        for (Class<?> current = clazz; current != null && current != Object.class; current = current.getSuperclass()) {
+            try {
+                return current.getDeclaredField(fieldName);
+            } catch (NoSuchFieldException ignored) {
+            }
+        }
+        return null;
     }
 }

@@ -1,14 +1,21 @@
 package io.github.canjiemo.base.myjdbc.test;
 
 import io.github.canjiemo.base.myjdbc.cache.TableCacheManager;
+import io.github.canjiemo.base.myjdbc.dao.IBaseDao;
 import io.github.canjiemo.base.myjdbc.lambda.LambdaQueryWrapper;
+import io.github.canjiemo.base.myjdbc.scope.MyJdbcScope;
 import io.github.canjiemo.base.myjdbc.test.entity.TestUser;
 import org.junit.jupiter.api.*;
 
+import java.lang.reflect.Proxy;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Map;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -193,5 +200,136 @@ class LambdaQueryWrapperTest {
         assertEquals("SELECT * FROM user", wrapper().between(TestUser::getId, 10L, null).buildSql());
         // 两端均非 null 时正常生成
         assertTrue(wrapper().between(TestUser::getId, 10L, 100L).buildSql().contains("BETWEEN"));
+    }
+
+    @Test
+    @Order(17)
+    @DisplayName("17. any 应生成 OR 条件组")
+    void testAnyGroup() {
+        LambdaQueryWrapper<TestUser, TestUser> q = wrapper()
+                .eq(TestUser::getDeleteFlag, 0)
+                .any(
+                        x -> x.eq(TestUser::getUsername, "张三"),
+                        x -> x.eq(TestUser::getId, 1L)
+                );
+        assertEquals(
+                "SELECT * FROM user WHERE delete_flag = :lwp0 AND ((username = :lwp1) OR (id = :lwp2))",
+                q.buildSql());
+    }
+
+    @Test
+    @Order(18)
+    @DisplayName("18. all 应生成显式 AND 条件组")
+    void testAllGroup() {
+        LambdaQueryWrapper<TestUser, TestUser> q = wrapper()
+                .all(
+                        x -> x.eq(TestUser::getDeleteFlag, 0),
+                        x -> x.like(TestUser::getUsername, "张")
+                );
+        assertEquals(
+                "SELECT * FROM user WHERE ((delete_flag = :lwp0) AND (username LIKE :lwp1))",
+                q.buildSql());
+    }
+
+    @Test
+    @Order(19)
+    @DisplayName("19. or 后续条件应按 OR 连接")
+    void testOrNextCondition() {
+        LambdaQueryWrapper<TestUser, TestUser> q = wrapper()
+                .eq(TestUser::getDeleteFlag, 0)
+                .or()
+                .eq(TestUser::getId, 1L);
+        assertEquals("SELECT * FROM user WHERE delete_flag = :lwp0 OR id = :lwp1", q.buildSql());
+    }
+
+    @Test
+    @Order(20)
+    @DisplayName("20. or(consumer) 应生成 OR 嵌套组")
+    void testOrConsumer() {
+        LambdaQueryWrapper<TestUser, TestUser> q = wrapper()
+                .eq(TestUser::getDeleteFlag, 0)
+                .or(x -> x.eq(TestUser::getUsername, "张三").eq(TestUser::getId, 1L));
+        assertEquals(
+                "SELECT * FROM user WHERE delete_flag = :lwp0 OR (username = :lwp1 AND id = :lwp2)",
+                q.buildSql());
+    }
+
+    @Test
+    @Order(21)
+    @DisplayName("21. when 为 false 时应跳过条件")
+    void testWhen() {
+        LambdaQueryWrapper<TestUser, TestUser> q = wrapper()
+                .when(false, x -> x.eq(TestUser::getUsername, "不会生效"))
+                .when(true, x -> x.eq(TestUser::getDeleteFlag, 0));
+        assertEquals("SELECT * FROM user WHERE delete_flag = :lwp0", q.buildSql());
+    }
+
+    @Test
+    @Order(22)
+    @DisplayName("22. exists 应重写内部参数名")
+    void testExists() {
+        LambdaQueryWrapper<TestUser, TestUser> q = wrapper()
+                .exists("SELECT 1 FROM user_role ur WHERE ur.user_id = user.id AND ur.role_id = :roleId",
+                        java.util.Map.of("roleId", 10L));
+        assertEquals(
+                "SELECT * FROM user WHERE EXISTS (SELECT 1 FROM user_role ur WHERE ur.user_id = user.id AND ur.role_id = :lwp0)",
+                q.buildSql());
+        assertEquals(10L, q.getParams().get("lwp0"));
+    }
+
+    @Test
+    @Order(23)
+    @DisplayName("23. selectAs + selectRaw + groupBy + having 应正确生成 SQL")
+    void testAggregateQuery() {
+        LambdaQueryWrapper<TestUser, TestUser> q = wrapper()
+                .selectAs(TestUser::getDeleteFlag, "flag")
+                .selectRaw("count(*)", "total")
+                .groupBy(TestUser::getDeleteFlag)
+                .having("count(*) >= :minCount", java.util.Map.of("minCount", 2));
+        assertEquals(
+                "SELECT delete_flag AS flag, count(*) AS total FROM user GROUP BY delete_flag HAVING count(*) >= :lwp0",
+                q.buildSql());
+        assertEquals(2, q.getParams().get("lwp0"));
+    }
+
+    @Test
+    @Order(24)
+    @DisplayName("24. allTenants + withDeleted 应只在本次执行内生效")
+    void testExecutionScope() {
+        AtomicReference<Boolean> tenantSkipped = new AtomicReference<>(false);
+        AtomicReference<Boolean> deleteSkipped = new AtomicReference<>(false);
+
+        IBaseDao dao = (IBaseDao) Proxy.newProxyInstance(
+                IBaseDao.class.getClassLoader(),
+                new Class[]{IBaseDao.class},
+                (proxy, method, args) -> {
+                    if ("queryListForSql".equals(method.getName())
+                            && method.getParameterCount() == 3
+                            && args[1] instanceof Map) {
+                        tenantSkipped.set(MyJdbcScope.isTenantSkipped());
+                        deleteSkipped.set(MyJdbcScope.isLogicDeleteSkipped());
+                        return List.of();
+                    }
+                    return null;
+                });
+
+        new LambdaQueryWrapper<>(TestUser.class, TestUser.class, dao)
+                .allTenants()
+                .withDeleted()
+                .list();
+
+        assertTrue(tenantSkipped.get(), "执行期应临时关闭租户隔离");
+        assertTrue(deleteSkipped.get(), "执行期应临时包含逻辑删除数据");
+        assertFalse(MyJdbcScope.isTenantSkipped(), "执行结束后租户作用域应恢复");
+        assertFalse(MyJdbcScope.isLogicDeleteSkipped(), "执行结束后逻辑删除作用域应恢复");
+    }
+
+    @Test
+    @Order(25)
+    @DisplayName("25. 危险 selectRaw 关键字应被拒绝")
+    void testRejectDangerousSelectRaw() {
+        IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
+                () -> wrapper().selectRaw("update user set delete_flag = 1"));
+        assertTrue(ex.getMessage().contains("危险关键字"));
     }
 }

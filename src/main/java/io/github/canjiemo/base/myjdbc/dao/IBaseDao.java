@@ -35,6 +35,8 @@ public interface IBaseDao {
 
 	<PO extends MyTableEntity> int updatePO(PO po, @Nullable String... forceUpdateProperties);
 
+	<PO extends MyTableEntity> int updateForSql(String sql, Map<String, Object> param, Class<PO> clazz);
+
 	<PO extends MyTableEntity> PO queryById(Object id, Class<PO> clazz);
 
 	<PO extends MyTableEntity> int delPO(PO po);

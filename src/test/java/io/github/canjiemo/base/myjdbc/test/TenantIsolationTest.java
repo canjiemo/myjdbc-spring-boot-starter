@@ -2,6 +2,7 @@ package io.github.canjiemo.base.myjdbc.test;
 
 import io.github.canjiemo.base.myjdbc.cache.TableCacheManager;
 import io.github.canjiemo.base.myjdbc.parser.JSqlDynamicSqlParser;
+import io.github.canjiemo.base.myjdbc.scope.MyJdbcScope;
 import io.github.canjiemo.base.myjdbc.tenant.TenantAwareSqlParameterSource;
 import io.github.canjiemo.base.myjdbc.tenant.TenantContext;
 import org.junit.jupiter.api.*;
@@ -267,8 +268,20 @@ class TenantIsolationTest {
 
     @Test
     @Order(14)
+    @DisplayName("5.3 MyJdbcScope.allTenants(Lambda) 也可跳过租户注入")
+    void test14_allTenantsScope() {
+        String[] resultHolder = new String[1];
+        MyJdbcScope.allTenants(() -> resultHolder[0] = appendTenantCondition("SELECT * FROM user"));
+
+        assertFalse(resultHolder[0].contains(":myjdbcTenantId"),
+                "allTenants 内不应注入租户条件");
+        assertFalse(MyJdbcScope.isTenantSkipped(), "allTenants 执行后作用域应恢复");
+    }
+
+    @Test
+    @Order(15)
     @DisplayName("5.3 TenantContext.setTenantId() ThreadLocal 方式")
-    void test14_threadLocalTenantId() {
+    void test15_threadLocalTenantId() {
         TenantContext.setTenantId(99L);
         try {
             assertEquals(99L, TenantContext.getTenantId(), "ThreadLocal 应返回设置的值");
@@ -283,9 +296,9 @@ class TenantIsolationTest {
     // =========================================================
 
     @Test
-    @Order(15)
+    @Order(16)
     @DisplayName("6.1 已有 tenant_id 条件不重复注入")
-    void test15_idempotency() {
+    void test16_idempotency() {
         String sqlWithTenant = "SELECT * FROM user WHERE user.tenant_id = :myjdbcTenantId";
         String result = appendTenantCondition(sqlWithTenant);
         // :myjdbcTenantId 应只出现一次
@@ -294,9 +307,9 @@ class TenantIsolationTest {
     }
 
     @Test
-    @Order(16)
+    @Order(17)
     @DisplayName("6.2 多次调用幂等")
-    void test16_multipleCallsIdempotent() {
+    void test17_multipleCallsIdempotent() {
         String sql = "SELECT * FROM user";
         String once = appendTenantCondition(sql);
         String twice = appendTenantCondition(once);
@@ -308,16 +321,16 @@ class TenantIsolationTest {
     // =========================================================
 
     @Test
-    @Order(17)
+    @Order(18)
     @DisplayName("7.1 role 表无 tenant_id 字段 — 不注入")
-    void test17_tableWithoutTenantSkipped() {
+    void test18_tableWithoutTenantSkipped() {
         String result = appendTenantCondition("SELECT * FROM role");
         assertFalse(result.contains(":myjdbcTenantId"),
                 "role 表未注册租户字段，不应注入租户条件");
     }
 
     @Test
-    @Order(18)
+    @Order(19)
     @DisplayName("7.2 未知表不注入")
     void test18_unknownTableSkipped() {
         String sql = "SELECT * FROM sys_config WHERE key = 'value'";

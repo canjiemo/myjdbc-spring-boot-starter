@@ -7,6 +7,7 @@ import io.github.canjiemo.base.myjdbc.builder.TableInfoBuilder;
 import io.github.canjiemo.base.myjdbc.cache.TableCacheManager;
 import io.github.canjiemo.base.myjdbc.configuration.MyJdbcProperties;
 import io.github.canjiemo.base.myjdbc.metadata.TableInfo;
+import io.github.canjiemo.base.myjdbc.scope.MyJdbcScope;
 import io.github.canjiemo.base.myjdbc.test.entity.TestUser;
 import io.github.canjiemo.base.myjdbc.utils.MyReflectionUtils;
 import io.github.canjiemo.mycommon.pager.Pager;
@@ -156,10 +157,73 @@ class BaseDaoImplIntegrationTest {
         assertEquals(1L, deleted, "其中 delete_flag=1 应有 1 行");
     }
 
-    // ── 分页 SQL 构建 ─────────────────────────────────────────────────────
+    @Test
+    @Order(4)
+    @DisplayName("queryListForSql 默认应过滤逻辑删除数据")
+    void queryListShouldHideDeletedRows() {
+        assertEquals(2, dao.queryListForSql("SELECT u.id FROM user u", Map.of(), Long.class).size());
+    }
 
     @Test
     @Order(5)
+    @DisplayName("MyJdbcScope.withDeleted 应临时包含逻辑删除数据")
+    void withDeletedScopeShouldExposeDeletedRows() {
+        assertEquals(3, MyJdbcScope.withDeleted(() ->
+                dao.queryListForSql("SELECT u.id FROM user u", Map.of(), Long.class)).size());
+    }
+
+    @Test
+    @Order(6)
+    @DisplayName("queryListForSql 应拒绝非查询语句")
+    void queryListShouldRejectNonQueryStatement() {
+        IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
+                () -> dao.queryListForSql("DELETE FROM user WHERE id = :id", Map.of("id", 100L), TestUser.class));
+        assertEquals("queryForSql 只允许执行查询 SQL", ex.getMessage());
+    }
+
+    @Test
+    @Order(7)
+    @DisplayName("updateForSql 应执行条件更新并返回影响行数")
+    void updateForSqlShouldUpdateRows() {
+        int affected = dao.updateForSql(
+                "UPDATE user SET username = :username WHERE id = :id",
+                Map.of("username", "alice-updated", "id", 100L),
+                TestUser.class);
+
+        assertEquals(1, affected);
+        String username = namedTpl.queryForObject(
+                "SELECT username FROM user WHERE id = :id",
+                Map.of("id", 100L),
+                String.class);
+        assertEquals("alice-updated", username);
+    }
+
+    // ── 分页 SQL 构建 ─────────────────────────────────────────────────────
+
+    @Test
+    @Order(8)
+    @DisplayName("updateForSql 默认应拒绝无 WHERE 的全表更新")
+    void updateForSqlShouldRejectUnsafeWriteByDefault() {
+        IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
+                () -> dao.updateForSql("UPDATE user SET delete_flag = :del", Map.of("del", 0), TestUser.class));
+        assertEquals("updateForSql 默认禁止无 WHERE 的全表更新，如确有需要请显式放开", ex.getMessage());
+    }
+
+    @Test
+    @Order(9)
+    @DisplayName("MyJdbcScope.allowUnsafeWrite 应允许显式全表更新")
+    void allowUnsafeWriteShouldPermitFullTableUpdate() {
+        int affected = MyJdbcScope.allowUnsafeWrite(() ->
+                dao.updateForSql("UPDATE user SET delete_flag = :del", Map.of("del", 0), TestUser.class));
+
+        assertEquals(3, affected);
+        Long notDeleted = namedTpl.queryForObject(
+                "SELECT COUNT(*) FROM user WHERE delete_flag = 0", Map.of(), Long.class);
+        assertEquals(3L, notDeleted);
+    }
+
+    @Test
+    @Order(10)
     @DisplayName("buildPagerSql (MySQL) 应生成含 LIMIT 的分页 SQL")
     void mysqlPagerSqlShouldContainLimitClause() {
         Pager<?> pager = new Pager<>(1, 10);
@@ -171,7 +235,7 @@ class BaseDaoImplIntegrationTest {
     // ── SQL 改写缓存指标 ──────────────────────────────────────────────────
 
     @Test
-    @Order(6)
+    @Order(11)
     @DisplayName("重复改写相同 SQL 后缓存命中次数应增加")
     void cacheHitsShouldIncreaseWithRepeatRewrites() {
         long hitsBefore = dao.getQueryRewriteCacheHits();
@@ -185,14 +249,14 @@ class BaseDaoImplIntegrationTest {
     }
 
     @Test
-    @Order(7)
+    @Order(12)
     @DisplayName("缓存条目数应在首次改写后大于 0")
     void cacheSizeShouldBePositiveAfterRewrites() {
         assertTrue(dao.getQueryRewriteCacheSize() > 0, "缓存条目数应大于 0");
     }
 
     @Test
-    @Order(8)
+    @Order(13)
     @DisplayName("不同 SQL 的未命中次数应大于 0")
     void cacheMissesShouldBePositiveAfterFirstRewrite() {
         assertTrue(dao.getQueryRewriteCacheMisses() > 0, "首次改写未命中次数应大于 0");

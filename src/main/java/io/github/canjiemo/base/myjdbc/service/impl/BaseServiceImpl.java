@@ -4,6 +4,7 @@ package io.github.canjiemo.base.myjdbc.service.impl;
 import io.github.canjiemo.base.myjdbc.MyTableEntity;
 import io.github.canjiemo.base.myjdbc.dao.IBaseDao;
 import io.github.canjiemo.base.myjdbc.lambda.LambdaQueryWrapper;
+import io.github.canjiemo.base.myjdbc.lambda.LambdaUpdateWrapper;
 import io.github.canjiemo.base.myjdbc.service.IBaseService;
 import io.github.canjiemo.mycommon.pager.Pager;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -151,6 +152,11 @@ public class BaseServiceImpl implements IBaseService {
 	/** 实体用于条件构造，结果映射到指定 DTO/VO */
 	protected <T extends MyTableEntity, R> LambdaQueryWrapper<T, R> lambdaQuery(Class<T> entityClazz, Class<R> resultClazz) {
 		return new LambdaQueryWrapper<>(entityClazz, resultClazz, baseDao);
+	}
+
+	/** 条件更新 DSL，默认禁止无条件全表更新。 */
+	protected <T extends MyTableEntity> LambdaUpdateWrapper<T> lambdaUpdate(Class<T> clazz) {
+		return new LambdaUpdateWrapper<>(clazz, baseDao);
 	}
 
 }

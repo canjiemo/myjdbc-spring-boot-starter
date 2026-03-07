@@ -16,6 +16,11 @@
 ### 🔗 Lambda 链式查询 API
 类型安全的条件构造器，告别手写 SQL 字符串。支持两种模式：
 
+当前已支持查询 DSL + 条件更新 DSL，并提供 `allTenants()`、`withDeleted()`、`allowFullTable()` 这类语义化开关。
+
+如需查看逐个方法的完整示例、生成 SQL 对照以及升级中的更新 DSL 设计，请参考：
+[`docs/lambda-query-update-guide.md`](docs/lambda-query-update-guide.md)
+
 ```java
 // ── 模式一：实体即结果（最常用）──────────────────────────
 
@@ -175,7 +180,7 @@ WHERE u.delete_flag = 0
 <dependency>
     <groupId>io.github.canjiemo</groupId>
     <artifactId>myjdbc-spring-boot-starter</artifactId>
-    <version>1.0.4-jdk21</version>
+    <version>1.0.5-jdk21</version>
 </dependency>
 ```
 

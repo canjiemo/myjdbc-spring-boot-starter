@@ -3,191 +3,86 @@ package io.github.canjiemo.base.myjdbc.lambda;
 import io.github.canjiemo.base.myjdbc.MyTableEntity;
 import io.github.canjiemo.base.myjdbc.cache.TableCacheManager;
 import io.github.canjiemo.base.myjdbc.dao.IBaseDao;
+import io.github.canjiemo.base.myjdbc.scope.MyJdbcScope;
 import io.github.canjiemo.mycommon.pager.Pager;
 
-import java.util.*;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
+import java.util.function.Supplier;
 
 /**
- * Lambda 链式查询构造器
+ * Lambda 链式查询构造器。
  *
- * <p>两个类型参数：
+ * <p>与早期版本相比，这一版的重点不是继续堆平铺方法，而是补“组合能力”：
  * <ul>
- *   <li>{@code T extends MyTableEntity}：实体类，决定表名和列映射（条件、排序、select 均基于此）</li>
- *   <li>{@code R}：结果类，终结方法的返回类型，可以是 {@code T} 本身或任意 DTO/VO</li>
+ *     <li>动态条件：{@code when(...)}</li>
+ *     <li>组合条件：{@code any(...)} / {@code all(...)} / {@code or(...)}</li>
+ *     <li>表达式查询：{@code exists(...)} / {@code groupBy(...)} / {@code having(...)}</li>
  * </ul>
- *
- * <pre>
- * // 实体即结果（默认）
- * lambdaQuery(UserPO.class)
- *     .eq(UserPO::getStatus, 1)
- *     .list();                        // List&lt;UserPO&gt;
- *
- * // 映射到 DTO
- * lambdaQuery(UserPO.class, UserDTO.class)
- *     .select(UserPO::getId, UserPO::getName)
- *     .eq(UserPO::getStatus, 1)
- *     .list();                        // List&lt;UserDTO&gt;
- * </pre>
- *
- * 生成的 SQL 自动经过逻辑删除 + 租户隔离条件注入管道。
  */
-public class LambdaQueryWrapper<T extends MyTableEntity, R> {
+public class LambdaQueryWrapper<T extends MyTableEntity, R>
+        extends AbstractLambdaFilter<T, LambdaQueryWrapper<T, R>> {
 
-    private final Class<T> entityClazz;   // 实体类：确定表名与列映射
-    private final Class<R> resultClazz;   // 结果类：终结方法的返回类型
+    private final Class<R> resultClazz;
     private final IBaseDao baseDao;
-    private final List<String> conditions = new ArrayList<>();
-    private final Map<String, Object> params = new LinkedHashMap<>();
-    private int paramIndex = 0;
     private final List<String> selectColumns = new ArrayList<>();
+    private final List<String> groupByColumns = new ArrayList<>();
     private final List<String> orderByClauses = new ArrayList<>();
+    private String havingClause;
+    private boolean acrossTenants;
+    private boolean includeDeleted;
 
     public LambdaQueryWrapper(Class<T> entityClazz, Class<R> resultClazz, IBaseDao baseDao) {
-        this.entityClazz = entityClazz;
+        super(entityClazz, new LambdaConditionBuilder<>(entityClazz));
         this.resultClazz = resultClazz;
         this.baseDao = baseDao;
     }
 
-    private String nextParam() {
-        return "lwp" + (paramIndex++);
-    }
-
-    private String col(SFunction<T, ?> fn) {
-        return LambdaUtils.getColumnName(fn, entityClazz);
-    }
-
-    /**
-     * 判断值是否为"空"：null、空白字符串、空集合均视为空，对应条件方法将自动跳过，不生成 SQL 片段。
-     */
-    private boolean isEmpty(Object val) {
-        if (val == null) return true;
-        if (val instanceof String s) return s.trim().isEmpty();
-        if (val instanceof Collection<?> c) return c.isEmpty();
-        return false;
-    }
-
-    // =========================================================
-    // 条件方法（全部 AND 连接，列名基于实体类 T）
-    // val 为 null / 空白字符串 / 空集合时自动跳过，不生成对应 SQL 片段
-    // =========================================================
-
-    public LambdaQueryWrapper<T, R> eq(SFunction<T, ?> fn, Object val) {
-        if (isEmpty(val)) return this;
-        String p = nextParam();
-        conditions.add(col(fn) + " = :" + p);
-        params.put(p, val);
+    @Override
+    protected LambdaQueryWrapper<T, R> self() {
         return this;
     }
-
-    public LambdaQueryWrapper<T, R> ne(SFunction<T, ?> fn, Object val) {
-        if (isEmpty(val)) return this;
-        String p = nextParam();
-        conditions.add(col(fn) + " != :" + p);
-        params.put(p, val);
-        return this;
-    }
-
-    public LambdaQueryWrapper<T, R> gt(SFunction<T, ?> fn, Object val) {
-        if (isEmpty(val)) return this;
-        String p = nextParam();
-        conditions.add(col(fn) + " > :" + p);
-        params.put(p, val);
-        return this;
-    }
-
-    public LambdaQueryWrapper<T, R> ge(SFunction<T, ?> fn, Object val) {
-        if (isEmpty(val)) return this;
-        String p = nextParam();
-        conditions.add(col(fn) + " >= :" + p);
-        params.put(p, val);
-        return this;
-    }
-
-    public LambdaQueryWrapper<T, R> lt(SFunction<T, ?> fn, Object val) {
-        if (isEmpty(val)) return this;
-        String p = nextParam();
-        conditions.add(col(fn) + " < :" + p);
-        params.put(p, val);
-        return this;
-    }
-
-    public LambdaQueryWrapper<T, R> le(SFunction<T, ?> fn, Object val) {
-        if (isEmpty(val)) return this;
-        String p = nextParam();
-        conditions.add(col(fn) + " <= :" + p);
-        params.put(p, val);
-        return this;
-    }
-
-    public LambdaQueryWrapper<T, R> like(SFunction<T, ?> fn, String val) {
-        if (isEmpty(val)) return this;
-        String p = nextParam();
-        conditions.add(col(fn) + " LIKE :" + p);
-        params.put(p, "%" + val + "%");
-        return this;
-    }
-
-    public LambdaQueryWrapper<T, R> likeLeft(SFunction<T, ?> fn, String val) {
-        if (isEmpty(val)) return this;
-        String p = nextParam();
-        conditions.add(col(fn) + " LIKE :" + p);
-        params.put(p, "%" + val);
-        return this;
-    }
-
-    public LambdaQueryWrapper<T, R> likeRight(SFunction<T, ?> fn, String val) {
-        if (isEmpty(val)) return this;
-        String p = nextParam();
-        conditions.add(col(fn) + " LIKE :" + p);
-        params.put(p, val + "%");
-        return this;
-    }
-
-    public LambdaQueryWrapper<T, R> in(SFunction<T, ?> fn, Collection<?> vals) {
-        if (isEmpty(vals)) return this;
-        String p = nextParam();
-        conditions.add(col(fn) + " IN (:" + p + ")");
-        params.put(p, vals);
-        return this;
-    }
-
-    public LambdaQueryWrapper<T, R> notIn(SFunction<T, ?> fn, Collection<?> vals) {
-        if (isEmpty(vals)) return this;
-        String p = nextParam();
-        conditions.add(col(fn) + " NOT IN (:" + p + ")");
-        params.put(p, vals);
-        return this;
-    }
-
-    public LambdaQueryWrapper<T, R> between(SFunction<T, ?> fn, Object v1, Object v2) {
-        if (isEmpty(v1) || isEmpty(v2)) return this;
-        String p1 = nextParam();
-        String p2 = nextParam();
-        conditions.add(col(fn) + " BETWEEN :" + p1 + " AND :" + p2);
-        params.put(p1, v1);
-        params.put(p2, v2);
-        return this;
-    }
-
-    public LambdaQueryWrapper<T, R> isNull(SFunction<T, ?> fn) {
-        conditions.add(col(fn) + " IS NULL");
-        return this;
-    }
-
-    public LambdaQueryWrapper<T, R> isNotNull(SFunction<T, ?> fn) {
-        conditions.add(col(fn) + " IS NOT NULL");
-        return this;
-    }
-
-    // =========================================================
-    // 列选择 & 排序（列名同样基于实体类 T）
-    // =========================================================
 
     @SafeVarargs
     public final LambdaQueryWrapper<T, R> select(SFunction<T, ?>... fns) {
         for (SFunction<T, ?> fn : fns) {
             selectColumns.add(col(fn));
         }
+        return this;
+    }
+
+    public LambdaQueryWrapper<T, R> selectAs(SFunction<T, ?> fn, String alias) {
+        SqlFragmentGuard.requireSafeIdentifier(alias, "selectAs 别名");
+        selectColumns.add(col(fn) + " AS " + alias.trim());
+        return this;
+    }
+
+    public LambdaQueryWrapper<T, R> selectRaw(String expression) {
+        selectColumns.add(conditionBuilder.normalizeFragment(expression, "selectRaw 表达式"));
+        return this;
+    }
+
+    public LambdaQueryWrapper<T, R> selectRaw(String expression, String alias) {
+        SqlFragmentGuard.requireSafeIdentifier(alias, "selectRaw 别名");
+        selectColumns.add(conditionBuilder.normalizeFragment(expression, "selectRaw 表达式")
+                + " AS " + alias.trim());
+        return this;
+    }
+
+    /**
+     * 在当前查询上临时关闭租户隔离，适合后台管理查询。
+     */
+    public LambdaQueryWrapper<T, R> allTenants() {
+        this.acrossTenants = true;
+        return this;
+    }
+
+    /**
+     * 在当前查询上包含逻辑删除数据，不再自动补 delete_flag = 0。
+     */
+    public LambdaQueryWrapper<T, R> withDeleted() {
+        this.includeDeleted = true;
         return this;
     }
 
@@ -207,9 +102,23 @@ public class LambdaQueryWrapper<T extends MyTableEntity, R> {
         return this;
     }
 
-    // =========================================================
-    // SQL 构建（可供测试直接断言）
-    // =========================================================
+    @SafeVarargs
+    public final LambdaQueryWrapper<T, R> groupBy(SFunction<T, ?>... fns) {
+        for (SFunction<T, ?> fn : fns) {
+            groupByColumns.add(col(fn));
+        }
+        return this;
+    }
+
+    public LambdaQueryWrapper<T, R> having(String expression) {
+        this.havingClause = conditionBuilder.normalizeFragment(expression, "HAVING 表达式");
+        return this;
+    }
+
+    public LambdaQueryWrapper<T, R> having(String expression, Map<String, ?> params) {
+        this.havingClause = conditionBuilder.bindFragment(expression, params, "HAVING 表达式");
+        return this;
+    }
 
     public String buildSql() {
         String tableName = TableCacheManager.getTableNameByClass(entityClazz);
@@ -217,32 +126,36 @@ public class LambdaQueryWrapper<T extends MyTableEntity, R> {
             throw new IllegalStateException(
                     "未找到实体类 " + entityClazz.getName() + " 对应的表名，请检查 @MyTable 注解");
         }
-        StringBuilder sb = new StringBuilder("SELECT ");
+        StringBuilder sql = new StringBuilder("SELECT ");
         if (selectColumns.isEmpty()) {
-            sb.append("*");
+            sql.append("*");
         } else {
-            sb.append(String.join(", ", selectColumns));
+            sql.append(String.join(", ", selectColumns));
         }
-        sb.append(" FROM ").append(tableName);
-        if (!conditions.isEmpty()) {
-            sb.append(" WHERE ").append(String.join(" AND ", conditions));
+        sql.append(" FROM ").append(tableName);
+
+        String whereSql = conditionBuilder.render();
+        if (!whereSql.isBlank()) {
+            sql.append(" WHERE ").append(whereSql);
+        }
+        if (!groupByColumns.isEmpty()) {
+            sql.append(" GROUP BY ").append(String.join(", ", groupByColumns));
+        }
+        if (havingClause != null && !havingClause.isBlank()) {
+            sql.append(" HAVING ").append(havingClause);
         }
         if (!orderByClauses.isEmpty()) {
-            sb.append(" ORDER BY ").append(String.join(", ", orderByClauses));
+            sql.append(" ORDER BY ").append(String.join(", ", orderByClauses));
         }
-        return sb.toString();
+        return sql.toString();
     }
 
     public Map<String, Object> getParams() {
-        return Collections.unmodifiableMap(params);
+        return conditionBuilder.getParamsView();
     }
 
-    // =========================================================
-    // 终结方法（返回类型为 R）
-    // =========================================================
-
     public List<R> list() {
-        return baseDao.queryListForSql(buildSql(), params, resultClazz);
+        return executeInScope(() -> baseDao.queryListForSql(buildSql(), getParams(), resultClazz));
     }
 
     public R one() {
@@ -252,15 +165,31 @@ public class LambdaQueryWrapper<T extends MyTableEntity, R> {
 
     public long count() {
         String countSql = "SELECT count(*) FROM (" + buildSql() + ") _lqw_count";
-        Long result = baseDao.querySingleForSql(countSql, params, Long.class);
+        Long result = executeInScope(() -> baseDao.querySingleForSql(countSql, getParams(), Long.class));
         return result == null ? 0L : result;
     }
 
     public Pager<R> page(Pager<R> pager) {
-        return baseDao.queryPageForSql(buildSql(), params, pager, resultClazz);
+        return executeInScope(() -> baseDao.queryPageForSql(buildSql(), getParams(), pager, resultClazz));
     }
 
     public boolean exists() {
         return count() > 0;
+    }
+
+    private <V> V executeInScope(Supplier<V> supplier) {
+        if (baseDao == null) {
+            throw new IllegalStateException("当前 LambdaQueryWrapper 未绑定 IBaseDao，无法执行查询");
+        }
+        Supplier<V> action = supplier;
+        if (includeDeleted) {
+            Supplier<V> delegate = action;
+            action = () -> MyJdbcScope.withDeleted(delegate);
+        }
+        if (acrossTenants) {
+            Supplier<V> delegate = action;
+            action = () -> MyJdbcScope.allTenants(delegate);
+        }
+        return action.get();
     }
 }

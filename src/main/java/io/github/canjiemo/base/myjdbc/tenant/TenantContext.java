@@ -1,5 +1,8 @@
 package io.github.canjiemo.base.myjdbc.tenant;
 
+import io.github.canjiemo.base.myjdbc.scope.MyJdbcFeature;
+import io.github.canjiemo.base.myjdbc.scope.MyJdbcScope;
+
 import java.util.function.Supplier;
 
 /**
@@ -71,6 +74,7 @@ public class TenantContext {
      */
     public static void skip() {
         SKIP_TENANT.set(Boolean.TRUE);
+        MyJdbcScope.skip(MyJdbcFeature.TENANT);
     }
 
     /**
@@ -78,13 +82,14 @@ public class TenantContext {
      */
     public static void restore() {
         SKIP_TENANT.remove();
+        MyJdbcScope.restore(MyJdbcFeature.TENANT);
     }
 
     /**
      * 检查当前线程是否已标记跳过租户条件注入
      */
     public static boolean isSkipped() {
-        return Boolean.TRUE.equals(SKIP_TENANT.get());
+        return Boolean.TRUE.equals(SKIP_TENANT.get()) || MyJdbcScope.isTenantSkipped();
     }
 
     /**
@@ -123,5 +128,6 @@ public class TenantContext {
     public static void clear() {
         TENANT_ID.remove();
         SKIP_TENANT.remove();
+        MyJdbcScope.clear();
     }
 }

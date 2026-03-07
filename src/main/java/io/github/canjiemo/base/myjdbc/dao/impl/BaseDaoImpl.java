@@ -11,6 +11,8 @@ import io.github.canjiemo.base.myjdbc.metadata.TableInfo;
 import io.github.canjiemo.base.myjdbc.parser.JSqlDynamicSqlParser;
 import io.github.canjiemo.base.myjdbc.parser.SqlParser;
 import io.github.canjiemo.base.myjdbc.rowmapper.MyBeanPropertyRowMapper;
+import io.github.canjiemo.base.myjdbc.scope.MyJdbcScope;
+import io.github.canjiemo.base.myjdbc.security.SqlOperationGuard;
 import io.github.canjiemo.base.myjdbc.tenant.TenantAwareSqlParameterSource;
 import io.github.canjiemo.base.myjdbc.tenant.TenantContext;
 import io.github.canjiemo.base.myjdbc.tenant.TenantIdProvider;
@@ -261,21 +263,21 @@ public class BaseDaoImpl implements IBaseDao {
 	 * tenantId=null（超管）时不改写 SQL，避免 :myjdbcTenantId 占位符缺少参数导致运行时异常。
 	 */
 	private ConditionResult applyConditions(String sql, SqlParameterSource sps) {
+		SqlOperationGuard.requireQueryStatement(sql, "queryForSql");
+		boolean includeDelete = !MyJdbcScope.isLogicDeleteSkipped();
 		boolean needTenant = tenantIsolationEnabled && !TenantContext.isSkipped();
 		Object tenantId = needTenant ? getCurrentTenantId() : null;
-
-		if (tenantId != null) {
-			// 单次解析：同时注入删除条件 + 租户条件
-			String processedSql = rewriteQuerySql(sql, QueryRewriteMode.DELETE_AND_TENANT);
-			if (processedSql.contains(":" + JSqlDynamicSqlParser.TENANT_PARAM_NAME)) {
-				return new ConditionResult(processedSql,
-						new TenantAwareSqlParameterSource(sps, JSqlDynamicSqlParser.TENANT_PARAM_NAME, tenantId));
-			}
-			return new ConditionResult(processedSql, sps);
-		} else {
-			// 单次解析：只注入删除条件
-			return new ConditionResult(rewriteQuerySql(sql, QueryRewriteMode.DELETE_ONLY), sps);
+		boolean includeTenant = tenantId != null;
+		QueryRewriteMode mode = resolveQueryRewriteMode(includeDelete, includeTenant);
+		if (mode == QueryRewriteMode.NONE) {
+			return new ConditionResult(sql, sps);
 		}
+		String processedSql = rewriteQuerySql(sql, mode);
+		if (includeTenant && processedSql.contains(":" + JSqlDynamicSqlParser.TENANT_PARAM_NAME)) {
+			return new ConditionResult(processedSql,
+					new TenantAwareSqlParameterSource(sps, JSqlDynamicSqlParser.TENANT_PARAM_NAME, tenantId));
+		}
+		return new ConditionResult(processedSql, sps);
 	}
 
 	String rewriteQuerySql(String sql, boolean includeTenantCondition) {
@@ -302,9 +304,24 @@ public class BaseDaoImpl implements IBaseDao {
 
 	private static String loadRewrittenSql(RewriteCacheKey key) {
 		return switch (key.mode()) {
+			case NONE -> key.sql();
 			case DELETE_ONLY -> JSqlDynamicSqlParser.appendDeleteCondition(key.sql());
+			case TENANT_ONLY -> JSqlDynamicSqlParser.appendTenantCondition(key.sql(), true, key.tenantColumn());
 			case DELETE_AND_TENANT -> JSqlDynamicSqlParser.appendConditions(key.sql(), true, key.tenantColumn());
 		};
+	}
+
+	private static QueryRewriteMode resolveQueryRewriteMode(boolean includeDelete, boolean includeTenant) {
+		if (includeDelete && includeTenant) {
+			return QueryRewriteMode.DELETE_AND_TENANT;
+		}
+		if (includeDelete) {
+			return QueryRewriteMode.DELETE_ONLY;
+		}
+		if (includeTenant) {
+			return QueryRewriteMode.TENANT_ONLY;
+		}
+		return QueryRewriteMode.NONE;
 	}
 
 	private <T> T querySingleInternal(String sql, SqlParameterSource sps, Class<T> clazz) {
@@ -327,7 +344,7 @@ public class BaseDaoImpl implements IBaseDao {
 	 * 返回 null 表示不需要注入（全局关闭 / 跳过 / 超管 / 表无租户列）。
 	 */
 	private Object getWriteTenantId(String tableName) {
-		if (!tenantIsolationEnabled || TenantContext.isSkipped()) return null;
+		if (!tenantIsolationEnabled || TenantContext.isSkipped() || MyJdbcScope.isTenantSkipped()) return null;
 		if (!TableCacheManager.hasTenantColumn(tableName)) return null;
 		return getCurrentTenantId();
 	}
@@ -339,10 +356,20 @@ public class BaseDaoImpl implements IBaseDao {
 	private ConditionResult applyWriteConditions(String sql, SqlParameterSource sps, String tableName) {
 		Object tenantId = getWriteTenantId(tableName);
 		if (tenantId == null) return new ConditionResult(sql, sps);
-		String processedSql = sql + " AND " + tenantColumn
-				+ " = :" + JSqlDynamicSqlParser.TENANT_PARAM_NAME;
+		String processedSql = appendTenantConditionToWriteSql(sql);
 		return new ConditionResult(processedSql,
 				new TenantAwareSqlParameterSource(sps, JSqlDynamicSqlParser.TENANT_PARAM_NAME, tenantId));
+	}
+
+	private String appendTenantConditionToWriteSql(String sql) {
+		String tenantCondition = tenantColumn + " = :" + JSqlDynamicSqlParser.TENANT_PARAM_NAME;
+		if (sql == null || sql.isBlank()) {
+			return sql;
+		}
+		if (sql.matches("(?is).*\\bwhere\\b.*")) {
+			return sql + " AND " + tenantCondition;
+		}
+		return sql + " WHERE " + tenantCondition;
 	}
 
 	/** 在类继承链中查找字段（支持父类）。 */
@@ -525,6 +552,24 @@ public class BaseDaoImpl implements IBaseDao {
 	}
 
 	@Override
+	public <PO extends MyTableEntity> int updateForSql(String sql, Map<String, Object> param, Class<PO> clazz) {
+		try {
+			TableInfo tableInfo = TableInfoBuilder.getTableInfo(clazz);
+			SqlOperationGuard.requireUpdateStatement(sql, MyJdbcScope.isUnsafeWriteAllowed(), "updateForSql");
+			SqlParameterSource sps = (param == null || param.isEmpty())
+					? new EmptySqlParameterSource()
+					: new MapSqlParameterSource(param);
+			var r = applyWriteConditions(sql, sps, tableInfo.getTableName());
+			return executeWithTiming(r.sql(), r.sps(), () -> namedParameterJdbcTemplate.update(r.sql(), r.sps()));
+		} catch (IllegalArgumentException e) {
+			throw e;
+		} catch (Exception e) {
+			throw businessError("updateForSql", e, MyJdbcErrorCode.DAO_ERROR.userMessage(),
+					clazz != null ? clazz.getName() : "null");
+		}
+	}
+
+	@Override
 	public <PO extends MyTableEntity> int delPO(PO po) {
 		try {
 			TableInfo tableInfo = TableInfoBuilder.getTableInfo(po.getClass());
@@ -651,7 +696,9 @@ public class BaseDaoImpl implements IBaseDao {
 	}
 
 	private enum QueryRewriteMode {
+		NONE,
 		DELETE_ONLY,
+		TENANT_ONLY,
 		DELETE_AND_TENANT
 	}
 
