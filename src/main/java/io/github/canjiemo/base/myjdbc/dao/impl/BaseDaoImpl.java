@@ -111,13 +111,14 @@ public class BaseDaoImpl implements IBaseDao {
 		}
 		try {
 			SqlLogPreview preview = buildSqlLogPreviewCached(sql, sps);
-			log.info("[MyJDBC] Preparing: {}", preview.preparedSql());
+			log.info("[MyJDBC] 执行语句: {}", preview.preparedSql());
 			if (!preview.parameters().isBlank()) {
-				log.info("[MyJDBC] Parameters: {}", preview.parameters());
+				log.info("[MyJDBC] 参数列表: {}", preview.parameters());
+				log.info("[MyJDBC] 完整SQL : {}", preview.inlineSql());
 			}
 		} catch (Exception e) {
 			log.debug("格式化 SQL 日志失败，回退为原始 SQL: {}", e.getMessage());
-			log.info("[MyJDBC] Preparing: {}", sql);
+			log.info("[MyJDBC] 执行语句: {}", sql);
 		}
 	}
 
@@ -131,13 +132,14 @@ public class BaseDaoImpl implements IBaseDao {
 		}
 		try {
 			SqlLogPreview preview = buildSqlLogPreviewCached(sql, batchParams[0]);
-			log.info("[MyJDBC] Preparing(batch x{}): {}", batchParams.length, preview.preparedSql());
+			log.info("[MyJDBC] 执行语句(批量 x{}): {}", batchParams.length, preview.preparedSql());
 			if (!preview.parameters().isBlank()) {
-				log.info("[MyJDBC] Parameters(first): {}", preview.parameters());
+				log.info("[MyJDBC] 参数列表(首条): {}", preview.parameters());
+				log.info("[MyJDBC] 完整SQL(首条) : {}", preview.inlineSql());
 			}
 		} catch (Exception e) {
 			log.debug("格式化批量 SQL 日志失败，回退为原始 SQL: {}", e.getMessage());
-			log.info("[MyJDBC] Preparing(batch x{}): {}", batchParams.length, sql);
+			log.info("[MyJDBC] 执行语句(批量 x{}): {}", batchParams.length, sql);
 		}
 	}
 
@@ -145,12 +147,12 @@ public class BaseDaoImpl implements IBaseDao {
 		if (!showSqlTimeEnabled || !log.isInfoEnabled()) {
 			return;
 		}
-		log.info("[MyJDBC] {}ms ← {}", System.currentTimeMillis() - start, sql);
+		log.info("[MyJDBC] 执行时间: {}ms", System.currentTimeMillis() - start);
 	}
 
 	private SqlLogPreview buildSqlLogPreviewCached(String sql, @Nullable SqlParameterSource sps) {
 		if (sps == null) {
-			return new SqlLogPreview(sql, "");
+			return new SqlLogPreview(sql, "", sql);
 		}
 		ParsedSql parsedSql = parsedSqlCache.computeIfAbsent(sql, NamedParameterUtils::parseSqlStatement);
 		return buildSqlLogPreview(parsedSql, sps);
@@ -158,7 +160,7 @@ public class BaseDaoImpl implements IBaseDao {
 
 	static SqlLogPreview buildSqlLogPreview(String sql, @Nullable SqlParameterSource sps) {
 		if (sps == null) {
-			return new SqlLogPreview(sql, "");
+			return new SqlLogPreview(sql, "", sql);
 		}
 		return buildSqlLogPreview(NamedParameterUtils.parseSqlStatement(sql), sps);
 	}
@@ -166,7 +168,47 @@ public class BaseDaoImpl implements IBaseDao {
 	private static SqlLogPreview buildSqlLogPreview(ParsedSql parsedSql, SqlParameterSource sps) {
 		String preparedSql = NamedParameterUtils.substituteNamedParameters(parsedSql, sps);
 		Object[] values = NamedParameterUtils.buildValueArray(parsedSql, sps, null);
-		return new SqlLogPreview(preparedSql, formatParameters(values));
+		return new SqlLogPreview(preparedSql, formatParameters(values), buildInlineSql(preparedSql, values));
+	}
+
+	/**
+	 * 将 preparedSql 中的 ? 占位符逐一替换为真实参数值，生成可直接在数据库客户端执行的 SQL。
+	 * 字符串类型加单引号并转义内部单引号；数字/布尔直接输出；null 输出 NULL；byte[] 输出 '[bytes:N]'。
+	 * Collection/数组参数会先展开为独立元素，与 preparedSql 中展开的多个 ? 一一对应。
+	 */
+	static String buildInlineSql(String preparedSql, Object[] values) {
+		if (values == null || values.length == 0) return preparedSql;
+		List<Object> flat = new ArrayList<>();
+		for (Object v : values) {
+			Object actual = unwrapParameterValue(v);
+			if (actual instanceof Collection<?> col) {
+				flat.addAll(col);
+			} else if (actual instanceof Object[] arr) {
+				flat.addAll(Arrays.asList(arr));
+			} else {
+				flat.add(actual);
+			}
+		}
+		StringBuilder sb = new StringBuilder(preparedSql.length() + flat.size() * 4);
+		int idx = 0;
+		for (int i = 0; i < preparedSql.length(); i++) {
+			if (preparedSql.charAt(i) == '?' && idx < flat.size()) {
+				sb.append(formatValueInline(flat.get(idx++)));
+			} else {
+				sb.append(preparedSql.charAt(i));
+			}
+		}
+		return sb.toString();
+	}
+
+	private static String formatValueInline(Object value) {
+		Object actual = unwrapParameterValue(value);
+		if (actual == null) return "NULL";
+		if (actual instanceof Number || actual instanceof Boolean) return actual.toString();
+		if (actual instanceof byte[] bytes) return "'[bytes:" + bytes.length + "]'";
+		String text = actual.toString();
+		if (text.length() > MAX_LOG_PARAM_LENGTH) text = text.substring(0, MAX_LOG_PARAM_LENGTH) + "...";
+		return "'" + text.replace("'", "''") + "'";
 	}
 
 	private static String formatParameters(Object[] values) {
@@ -216,7 +258,7 @@ public class BaseDaoImpl implements IBaseDao {
 		return text + "(" + actualValue.getClass().getSimpleName() + ")";
 	}
 
-	record SqlLogPreview(String preparedSql, String parameters) {}
+	record SqlLogPreview(String preparedSql, String parameters, String inlineSql) {}
 
 	public boolean isWrapClass(Class<?> clz) {
 		return BeanUtils.isSimpleValueType(clz) || clz == java.sql.Date.class;
