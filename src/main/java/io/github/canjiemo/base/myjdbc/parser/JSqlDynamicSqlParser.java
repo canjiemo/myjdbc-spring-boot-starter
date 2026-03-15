@@ -45,6 +45,8 @@ public class JSqlDynamicSqlParser {
      * <p>注意：此方法不检查表名注册，由调用方（{@code BaseDaoImpl}）负责判断表是否有租户字段。
      *
      * @param sql 原始 INSERT SQL
+     * @param tenantEnabled 是否启用租户隔离
+     * @param tenantColumn 租户列名
      * @return 追加租户列后的 SQL；全局关闭、已含租户列或格式无法识别时返回原 SQL
      */
     public static String appendTenantToInsertSql(String sql, boolean tenantEnabled, String tenantColumn) {

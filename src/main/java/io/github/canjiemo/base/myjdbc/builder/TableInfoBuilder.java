@@ -1,5 +1,7 @@
 package io.github.canjiemo.base.myjdbc.builder;
 
+import io.github.canjiemo.base.myjdbc.annotation.AuditFill;
+import io.github.canjiemo.base.myjdbc.annotation.MyField;
 import io.github.canjiemo.base.myjdbc.annotation.MyTable;
 import io.github.canjiemo.base.myjdbc.cache.TableCacheManager;
 import io.github.canjiemo.base.myjdbc.error.MyJdbcErrorCode;
@@ -19,6 +21,8 @@ import org.springframework.core.Ordered;
 import org.springframework.core.type.filter.AnnotationTypeFilter;
 
 import java.lang.reflect.Field;
+import java.lang.reflect.InaccessibleObjectException;
+import java.time.LocalDateTime;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -89,6 +93,7 @@ public class TableInfoBuilder implements BeanPostProcessor, Ordered {
                     .setDelColumnName(annotation.delColumn())
                     .setDelFieldName(annotation.delField())
                     .setDelValue(annotation.delValue());
+            buildAuditFields(tableInfo);
             tableInfoMap.put(aClass, tableInfo);
         }
 
@@ -176,6 +181,57 @@ public class TableInfoBuilder implements BeanPostProcessor, Ordered {
                 packages.add(packageName);
             }
         }
+    }
+
+    /**
+     * 扫描 tableInfo.fieldList，将标注了 @MyField(fill!=NONE) 的字段
+     * 分别收集到 auditInsertFields / auditUpdateFields 并设置 setAccessible(true)。
+     * auditUpdateFields 仅收录 fill=UPDATE_TIME 或 UPDATE_BY 的字段（CREATE_* 只在 INSERT 时填充）。
+     * 此方法在启动时调用一次，运行时直接使用缓存列表，无需重复反射扫描。
+     */
+    private void buildAuditFields(TableInfo tableInfo) {
+        List<Field> insertFields = new ArrayList<>();
+        List<Field> updateFields = new ArrayList<>();
+        for (Field field : tableInfo.getFieldList()) {
+            MyField myField = field.getAnnotation(MyField.class);
+            if (myField == null || myField.fill() == AuditFill.NONE) continue;
+            try {
+                field.setAccessible(true);
+            } catch (InaccessibleObjectException e) {
+                log.warn("审计字段 {}.{} 无法访问，跳过自动填充: {}",
+                        tableInfo.getTableName(), field.getName(), e.getMessage());
+                continue;
+            }
+            // 校验字段类型与 fill 策略是否兼容，不兼容则跳过（启动期快速失败，优于运行期静默错误）
+            if (!isAuditFieldTypeCompatible(field, myField.fill())) {
+                log.error("审计字段类型不兼容，已跳过自动填充: {}.{} (type={}, fill={}). "
+                        + "时间字段支持 LocalDateTime/Date/Timestamp/Long，操作人字段支持 Long/Integer/String",
+                        tableInfo.getTableName(), field.getName(),
+                        field.getType().getSimpleName(), myField.fill());
+                continue;
+            }
+            insertFields.add(field); // INSERT 填充所有审计字段
+            if (myField.fill() == AuditFill.UPDATE_TIME || myField.fill() == AuditFill.UPDATE_BY) {
+                updateFields.add(field); // UPDATE 只填充 UPDATE_* 字段
+            }
+        }
+        if (!insertFields.isEmpty()) tableInfo.setAuditInsertFields(List.copyOf(insertFields));
+        if (!updateFields.isEmpty()) tableInfo.setAuditUpdateFields(List.copyOf(updateFields));
+    }
+
+    /** 校验字段类型是否与 fill 策略兼容，不兼容时跳过缓存（启动期快速失败）。 */
+    private static boolean isAuditFieldTypeCompatible(Field field, AuditFill fill) {
+        Class<?> type = field.getType();
+        return switch (fill) {
+            case CREATE_TIME, UPDATE_TIME -> type == LocalDateTime.class
+                    || type == java.util.Date.class
+                    || type == java.sql.Timestamp.class
+                    || type == Long.class || type == long.class;
+            case CREATE_BY, UPDATE_BY -> type == Long.class || type == long.class
+                    || type == Integer.class || type == int.class
+                    || type == String.class;
+            case NONE -> true;
+        };
     }
 
     /**

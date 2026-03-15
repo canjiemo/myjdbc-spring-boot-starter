@@ -13,6 +13,7 @@ import org.springframework.beans.BeanUtils;
 import java.beans.PropertyDescriptor;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
+import java.util.Collections;
 import java.util.List;
 import java.util.Optional;
 
@@ -29,6 +30,12 @@ public class TableInfo {
     private int delValue;
     private Class<?> clazz;
     private List<Field> fieldList;
+
+    /** INSERT 时需自动填充的审计字段（CREATE_TIME/UPDATE_TIME/CREATE_BY/UPDATE_BY）。启动时由 TableInfoBuilder 缓存，运行时只读。 */
+    private List<Field> auditInsertFields = Collections.emptyList();
+
+    /** UPDATE 时需自动填充的审计字段（UPDATE_TIME/UPDATE_BY）。启动时由 TableInfoBuilder 缓存，运行时只读。 */
+    private List<Field> auditUpdateFields = Collections.emptyList();
 
 
     public Field getFieldByName(String fieldName){
