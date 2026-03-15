@@ -32,8 +32,12 @@ import org.springframework.jdbc.support.GeneratedKeyHolder;
 import org.springframework.jdbc.support.KeyHolder;
 import org.springframework.lang.Nullable;
 
+import io.github.canjiemo.base.myjdbc.audit.AuditFieldProvider;
+import io.github.canjiemo.base.myjdbc.annotation.AuditFill;
+import io.github.canjiemo.base.myjdbc.annotation.MyField;
 import java.io.Serializable;
 import java.lang.reflect.Field;
+import java.time.LocalDateTime;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -274,6 +278,10 @@ public class BaseDaoImpl implements IBaseDao {
 	@Autowired(required = false)
 	private TenantIdProvider tenantIdProvider;
 
+	/** 审计字段操作人提供者（SPI），集成方注册 Bean 后自动注入；未注册则为 null */
+	@Autowired(required = false)
+	private AuditFieldProvider auditFieldProvider;
+
 	protected JdbcTemplate getJdbcTemplate() {
 		return (JdbcTemplate) this.namedParameterJdbcTemplate.getJdbcOperations();
 	}
@@ -437,6 +445,62 @@ public class BaseDaoImpl implements IBaseDao {
 		}
 	}
 
+	/**
+	 * 在写操作（INSERT/UPDATE）前自动填充审计字段。
+	 * <ul>
+	 *   <li>INSERT：填充 CREATE_TIME / UPDATE_TIME / CREATE_BY / UPDATE_BY</li>
+	 *   <li>UPDATE：仅填充 UPDATE_TIME / UPDATE_BY</li>
+	 * </ul>
+	 * 字段已有非 null 值时跳过，不覆盖业务侧显式赋值。
+	 *
+	 * @param po     实体对象
+	 * @param fields 预缓存的待填充字段列表（来自 TableInfo）
+	 * @param now    本次操作的时间戳（批量时统一传入，避免循环内重复调用）
+	 * @param userId 当前操作人 ID，null 则跳过 BY 字段填充
+	 */
+	private <PO extends MyTableEntity> void fillAuditFields(
+			PO po, List<Field> fields, LocalDateTime now, Object userId) {
+		if (fields == null || fields.isEmpty()) return;
+		for (Field field : fields) {
+			try {
+				if (field.get(po) != null) continue;
+				MyField myField = field.getAnnotation(MyField.class);
+				if (myField == null) continue;
+				AuditFill fillType = myField.fill();
+				if (fillType == AuditFill.CREATE_TIME || fillType == AuditFill.UPDATE_TIME) {
+					field.set(po, convertTime(now, field.getType()));
+				} else if ((fillType == AuditFill.CREATE_BY || fillType == AuditFill.UPDATE_BY)
+						&& userId != null) {
+					field.set(po, convertUserId(userId, field.getType()));
+				}
+			} catch (Exception e) {
+				log.warn("自动填充审计字段 {} 失败: {}", field.getName(), e.getMessage());
+			}
+		}
+	}
+
+	/** 将 LocalDateTime 适配到字段类型（支持 LocalDateTime / Date / Timestamp / Long 时间戳）。 */
+	private static Object convertTime(LocalDateTime now, Class<?> fieldType) {
+		if (fieldType == LocalDateTime.class) return now;
+		if (fieldType == java.util.Date.class)
+			return java.util.Date.from(now.atZone(java.time.ZoneId.systemDefault()).toInstant());
+		if (fieldType == java.sql.Timestamp.class)
+			return java.sql.Timestamp.valueOf(now);
+		if (fieldType == Long.class || fieldType == long.class)
+			return now.atZone(java.time.ZoneId.systemDefault()).toInstant().toEpochMilli();
+		return now;
+	}
+
+	/** 将 userId 适配到字段类型（支持 Long / Integer / String）。 */
+	private static Object convertUserId(Object userId, Class<?> fieldType) {
+		if (fieldType.isInstance(userId)) return userId;
+		String s = userId.toString();
+		if (fieldType == Long.class || fieldType == long.class) return Long.parseLong(s);
+		if (fieldType == Integer.class || fieldType == int.class) return Integer.parseInt(s);
+		if (fieldType == String.class) return s;
+		return userId;
+	}
+
 	@Override
 	public <T> List<T> queryListForSql(String sql, Object param, Class<T> clazz) {
 		SqlParameterSource sps = param == null
@@ -530,6 +594,13 @@ public class BaseDaoImpl implements IBaseDao {
 			TableInfo tableInfo = TableInfoBuilder.getTableInfo(po.getClass());
 			if (autoCreateId) tableInfo.setPkValue(po);
 
+			// 审计字段自动填充（INSERT：填充所有审计字段）
+			List<Field> auditInsert = tableInfo.getAuditInsertFields();
+			if (!auditInsert.isEmpty()) {
+				Object uid = auditFieldProvider != null ? auditFieldProvider.getCurrentUserId() : null;
+				fillAuditFields(po, auditInsert, LocalDateTime.now(), uid);
+			}
+
 			String sql = SqlParser.getInsertSql(tableInfo, po);
 			SqlParameterSource paramSource = new BeanPropertySqlParameterSource(po);
 
@@ -584,6 +655,14 @@ public class BaseDaoImpl implements IBaseDao {
 	private <PO extends MyTableEntity> int updatePO(PO po, boolean ignoreNull, @Nullable String... forceUpdateFields) {
 		try {
 			TableInfo tableInfo = TableInfoBuilder.getTableInfo(po.getClass());
+
+			// 审计字段自动填充（UPDATE：仅填充 UPDATE_TIME / UPDATE_BY）
+			List<Field> auditUpdate = tableInfo.getAuditUpdateFields();
+			if (!auditUpdate.isEmpty()) {
+				Object uid = auditFieldProvider != null ? auditFieldProvider.getCurrentUserId() : null;
+				fillAuditFields(po, auditUpdate, LocalDateTime.now(), uid);
+			}
+
 			String sql = SqlParser.getUpdateSql(tableInfo, po, ignoreNull, forceUpdateFields);
 			SqlParameterSource paramSource = new BeanPropertySqlParameterSource(po);
 			var r = applyWriteConditions(sql, paramSource, tableInfo.getTableName());
@@ -666,6 +745,14 @@ public class BaseDaoImpl implements IBaseDao {
 			TableInfo tableInfo = TableInfoBuilder.getTableInfo(pos.get(0).getClass());
 			if (autoCreateId) {
 				for (PO po : pos) TableInfoBuilder.getTableInfo(po.getClass()).setPkValue(po);
+			}
+
+			// 审计字段自动填充（批量 INSERT：批次外统一计算，避免循环内重复调用）
+			List<Field> auditInsert = tableInfo.getAuditInsertFields();
+			if (!auditInsert.isEmpty()) {
+				LocalDateTime now = LocalDateTime.now();
+				Object uid = auditFieldProvider != null ? auditFieldProvider.getCurrentUserId() : null;
+				for (PO po : pos) fillAuditFields(po, auditInsert, now, uid);
 			}
 
 			// ignoreNull=false：保证批次内所有行 schema 一致
