@@ -4,7 +4,7 @@
     <modelVersion>4.0.0</modelVersion>
     <groupId>io.github.canjiemo</groupId>
     <artifactId>myjdbc-spring-boot-starter</artifactId>
-    <version>1.0.7-jdk21</version>
+    <version>1.0.8-jdk21</version>
     <packaging>jar</packaging>
     <name>${project.artifactId}-${project.version}</name>
     <description>${project.artifactId}-${project.version}</description>

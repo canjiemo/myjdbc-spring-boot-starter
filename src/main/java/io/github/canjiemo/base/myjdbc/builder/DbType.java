@@ -6,10 +6,15 @@ package io.github.canjiemo.base.myjdbc.builder;
  */
 public enum DbType {
 
+    /** MySQL 数据库，类型码 1 */
     MYSQL(1),
+    /** Oracle 数据库，类型码 2 */
     ORACLE(2),
+    /** SQL Server 数据库，类型码 3 */
     SQL_SERVER(3),
+    /** 人大金仓 KingbaseES 数据库，类型码 4 */
     KINGBASE_ES(4),
+    /** PostgreSQL 数据库，类型码 5 */
     POSTGRESQL(5);
 
     private final int code;

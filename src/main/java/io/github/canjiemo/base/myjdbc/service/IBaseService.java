@@ -9,6 +9,9 @@ import java.util.List;
 import java.util.Map;
 
 
+/**
+ * 基础 Service 接口，提供通用的增删改查操作。
+ */
 public interface IBaseService {
 
 	<T> Pager<T> queryPageForSql(String sql, Object param, Pager<T> pager, Class<T> clazz);
