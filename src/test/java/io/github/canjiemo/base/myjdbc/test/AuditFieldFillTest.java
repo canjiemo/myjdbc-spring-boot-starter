@@ -11,7 +11,11 @@ import io.github.canjiemo.base.myjdbc.dao.impl.BaseDaoImpl;
 import io.github.canjiemo.base.myjdbc.metadata.TableInfo;
 import io.github.canjiemo.base.myjdbc.test.entity.AuditableUser;
 import io.github.canjiemo.base.myjdbc.utils.MyReflectionUtils;
-import org.junit.jupiter.api.*;
+import org.junit.jupiter.api.AfterAll;
+import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Test;
 
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
@@ -31,7 +35,6 @@ import static org.junit.jupiter.api.Assertions.*;
  *  - UPDATE 时只填充 UPDATE_TIME / UPDATE_BY
  *  - userId=null 时 BY 字段跳过，TIME 字段正常填充
  */
-@TestMethodOrder(MethodOrderer.OrderAnnotation.class)
 @DisplayName("审计字段自动填充功能测试")
 class AuditFieldFillTest {
 
@@ -85,6 +88,12 @@ class AuditFieldFillTest {
         fillAuditFieldsMethod.setAccessible(true);
     }
 
+    @BeforeEach
+    void beforeEach() {
+        // 每个测试使用全新 AuditableUser 实例，无需重置共享状态
+        // 此方法保留以备将来扩展，保持与 TenantIsolationTest 风格一致
+    }
+
     @AfterAll
     @SuppressWarnings("unchecked")
     static void teardown() throws Exception {
@@ -110,7 +119,6 @@ class AuditFieldFillTest {
     // =========================================================
 
     @Test
-    @Order(1)
     @DisplayName("1.1 auditInsertFields 包含全部 4 个审计字段")
     void tableInfoCachesAuditFields() {
         TableInfo info = tableInfo();
@@ -122,6 +130,12 @@ class AuditFieldFillTest {
                 "INSERT 时应有 4 个审计字段（createTime/updateTime/createBy/updateBy）");
         assertEquals(2, updateFields.size(),
                 "UPDATE 时应只有 2 个审计字段（updateTime/updateBy）");
+
+        var insertFieldNames = info.getAuditInsertFields().stream().map(Field::getName).toList();
+        assertTrue(insertFieldNames.contains("createTime"), "createTime 应在 INSERT 字段中");
+        assertTrue(insertFieldNames.contains("updateTime"), "updateTime 应在 INSERT 字段中");
+        assertTrue(insertFieldNames.contains("createBy"), "createBy 应在 INSERT 字段中");
+        assertTrue(insertFieldNames.contains("updateBy"), "updateBy 应在 INSERT 字段中");
 
         // createTime/createBy 不应出现在 updateFields 中
         List<String> updateFieldNames = updateFields.stream().map(Field::getName).toList();
@@ -140,7 +154,6 @@ class AuditFieldFillTest {
     // =========================================================
 
     @Test
-    @Order(2)
     @DisplayName("2.1 INSERT 时所有 null 审计字段被填充")
     void insertFillsAllAuditFieldsWhenNull() throws Exception {
         AuditableUser po = new AuditableUser();
@@ -160,7 +173,6 @@ class AuditFieldFillTest {
     // =========================================================
 
     @Test
-    @Order(3)
     @DisplayName("3.1 INSERT 时已有值的字段不被覆盖")
     void insertDoesNotOverrideExistingValues() throws Exception {
         AuditableUser po = new AuditableUser();
@@ -187,7 +199,6 @@ class AuditFieldFillTest {
     // =========================================================
 
     @Test
-    @Order(4)
     @DisplayName("4.1 UPDATE 时只填充 updateTime/updateBy，createTime/createBy 保持 null")
     void updateOnlyFillsUpdateFields() throws Exception {
         AuditableUser po = new AuditableUser();
@@ -211,7 +222,6 @@ class AuditFieldFillTest {
     // =========================================================
 
     @Test
-    @Order(5)
     @DisplayName("5.1 userId=null 时 BY 字段跳过，TIME 字段正常填充")
     void noAuditProviderSkipsByFields() throws Exception {
         AuditableUser po = new AuditableUser();
