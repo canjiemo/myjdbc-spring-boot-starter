@@ -15,8 +15,12 @@ package io.github.canjiemo.base.myjdbc.annotation;
  */
 public enum AuditFill {
     NONE,
+    /** 仅 INSERT 时填充 {@code LocalDateTime.now()} */
     CREATE_TIME,
+    /** INSERT 和 UPDATE 时均填充 {@code LocalDateTime.now()}（注意：不仅限于 UPDATE） */
     UPDATE_TIME,
+    /** 仅 INSERT 时填充 {@link AuditFieldProvider#getCurrentUserId()} */
     CREATE_BY,
+    /** INSERT 和 UPDATE 时均填充 {@link AuditFieldProvider#getCurrentUserId()} */
     UPDATE_BY
 }

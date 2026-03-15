@@ -20,9 +20,9 @@ package io.github.canjiemo.base.myjdbc.audit;
 public interface AuditFieldProvider {
 
     /**
-     * 获取当前操作人 ID（或用户名）。
+     * 获取当前操作人 ID。
      *
-     * @return 操作人标识，返回 {@code null} 表示跳过填充
+     * @return 操作人 ID，返回 {@code null} 表示跳过填充
      */
     Object getCurrentUserId();
 }
