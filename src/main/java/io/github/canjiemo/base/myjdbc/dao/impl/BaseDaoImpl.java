@@ -463,10 +463,13 @@ public class BaseDaoImpl implements IBaseDao {
 		if (fields == null || fields.isEmpty()) return;
 		for (Field field : fields) {
 			try {
-				if (field.get(po) != null) continue;
 				MyField myField = field.getAnnotation(MyField.class);
 				if (myField == null) continue;
 				AuditFill fillType = myField.fill();
+				// CREATE_* 字段：已有非 null 值则跳过（尊重手动赋值，也避免 INSERT 时覆盖已有创建时间）
+				// UPDATE_* 字段：强制覆盖（从 DB 查出的实体字段必然已有值，跳过会导致 updateTime 永不刷新）
+				boolean isUpdateField = fillType == AuditFill.UPDATE_TIME || fillType == AuditFill.UPDATE_BY;
+				if (!isUpdateField && field.get(po) != null) continue;
 				if (fillType == AuditFill.CREATE_TIME || fillType == AuditFill.UPDATE_TIME) {
 					field.set(po, convertTime(now, field.getType()));
 				} else if ((fillType == AuditFill.CREATE_BY || fillType == AuditFill.UPDATE_BY)

@@ -218,6 +218,30 @@ class AuditFieldFillTest {
     }
 
     // =========================================================
+    // 4.2 UPDATE — updateTime/updateBy 已有值时强制覆盖（修复：从 DB 查出的实体也能刷新）
+    // =========================================================
+
+    @Test
+    @DisplayName("4.2 UPDATE 时 updateTime/updateBy 已有值也强制覆盖")
+    void updateForceOverridesExistingUpdateFields() throws Exception {
+        AuditableUser po = new AuditableUser();
+        po.setUsername("carol");
+
+        // 模拟从 DB 查出来的实体：updateTime/updateBy 已有旧值
+        LocalDateTime oldTime = LocalDateTime.of(2020, 6, 1, 0, 0, 0);
+        po.setUpdateTime(oldTime);
+        po.setUpdateBy(99L);
+
+        LocalDateTime now = LocalDateTime.now();
+        callFill(po, tableInfo().getAuditUpdateFields(), now, 42L);
+
+        // UPDATE_* 字段必须强制覆盖，不能因为已有值就跳过
+        assertNotEquals(oldTime, po.getUpdateTime(), "updateTime 应被刷新，不能保留旧值");
+        assertNotNull(po.getUpdateTime(), "updateTime 不能为 null");
+        assertEquals(42L, po.getUpdateBy(), "updateBy 应被刷新为当前操作人 42，不能保留旧值 99");
+    }
+
+    // =========================================================
     // 5. userId=null — BY 字段跳过，TIME 字段正常填充
     // =========================================================
 
