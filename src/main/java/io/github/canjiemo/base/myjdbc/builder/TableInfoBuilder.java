@@ -21,6 +21,7 @@ import org.springframework.core.Ordered;
 import org.springframework.core.type.filter.AnnotationTypeFilter;
 
 import java.lang.reflect.Field;
+import java.lang.reflect.InaccessibleObjectException;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -184,6 +185,7 @@ public class TableInfoBuilder implements BeanPostProcessor, Ordered {
     /**
      * 扫描 tableInfo.fieldList，将标注了 @MyField(fill!=NONE) 的字段
      * 分别收集到 auditInsertFields / auditUpdateFields 并设置 setAccessible(true)。
+     * auditUpdateFields 仅收录 fill=UPDATE_TIME 或 UPDATE_BY 的字段（CREATE_* 只在 INSERT 时填充）。
      * 此方法在启动时调用一次，运行时直接使用缓存列表，无需重复反射扫描。
      */
     private void buildAuditFields(TableInfo tableInfo) {
@@ -192,14 +194,20 @@ public class TableInfoBuilder implements BeanPostProcessor, Ordered {
         for (Field field : tableInfo.getFieldList()) {
             MyField myField = field.getAnnotation(MyField.class);
             if (myField == null || myField.fill() == AuditFill.NONE) continue;
-            field.setAccessible(true);
+            try {
+                field.setAccessible(true);
+            } catch (InaccessibleObjectException e) {
+                log.warn("审计字段 {}.{} 无法访问，跳过自动填充: {}",
+                        tableInfo.getTableName(), field.getName(), e.getMessage());
+                continue;
+            }
             insertFields.add(field); // INSERT 填充所有审计字段
             if (myField.fill() == AuditFill.UPDATE_TIME || myField.fill() == AuditFill.UPDATE_BY) {
                 updateFields.add(field); // UPDATE 只填充 UPDATE_* 字段
             }
         }
-        if (!insertFields.isEmpty()) tableInfo.setAuditInsertFields(insertFields);
-        if (!updateFields.isEmpty()) tableInfo.setAuditUpdateFields(updateFields);
+        if (!insertFields.isEmpty()) tableInfo.setAuditInsertFields(List.copyOf(insertFields));
+        if (!updateFields.isEmpty()) tableInfo.setAuditUpdateFields(List.copyOf(updateFields));
     }
 
     /**
