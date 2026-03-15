@@ -9,7 +9,7 @@
 
 ### 📝 注解驱动开发
 - `@MyTable` - 实体类与数据库表映射，支持逻辑删除配置
-- `@MyField` - 字段与列映射，支持序列化控制
+- `@MyField` - 字段与列映射，支持序列化控制与**审计字段自动填充**（`fill = AuditFill.CREATE_TIME` 等）
 - `MyTableEntity` - 标记接口，编译期强制规范（APT 自动校验）
 - 零 XML 配置，开箱即用
 
@@ -180,7 +180,7 @@ WHERE u.delete_flag = 0
 <dependency>
     <groupId>io.github.canjiemo</groupId>
     <artifactId>myjdbc-spring-boot-starter</artifactId>
-    <version>1.0.7-jdk21</version>
+    <version>1.0.8-jdk21</version>
 </dependency>
 ```
 
@@ -653,6 +653,74 @@ try {
     TenantContext.restore();
 }
 ```
+
+---
+
+### 📝 审计字段自动填充（可选）
+
+> 无需配置开关，在实体字段上加 `@MyField(fill = AuditFill.XXX)` 即可生效。
+
+框架在 `insertPO` / `updatePO` / `batchInsertPO` 执行**前**自动填充审计字段，字段已有非 null 值时跳过（不覆盖业务侧显式赋值）。
+
+#### 填充策略
+
+| `AuditFill` 值 | 触发时机 | 填充内容 |
+|---|---|---|
+| `CREATE_TIME` | 仅 INSERT | `LocalDateTime.now()` |
+| `UPDATE_TIME` | INSERT 和 UPDATE | `LocalDateTime.now()` |
+| `CREATE_BY` | 仅 INSERT | `AuditFieldProvider.getCurrentUserId()` |
+| `UPDATE_BY` | INSERT 和 UPDATE | `AuditFieldProvider.getCurrentUserId()` |
+
+#### 快速接入
+
+**第一步：实体字段标注**
+
+```java
+import io.github.canjiemo.base.myjdbc.annotation.AuditFill;
+import io.github.canjiemo.base.myjdbc.annotation.MyField;
+
+@MyTable(value = "sys_user", delColumn = "delete_flag", delField = "deleteFlag")
+public class UserPO implements MyTableEntity {
+
+    private Long id;
+    private String userName;
+
+    @MyField(fill = AuditFill.CREATE_TIME)
+    private LocalDateTime createTime;
+
+    @MyField(fill = AuditFill.UPDATE_TIME)
+    private LocalDateTime updateTime;
+
+    @MyField(fill = AuditFill.CREATE_BY)
+    private Long createBy;
+
+    @MyField(fill = AuditFill.UPDATE_BY)
+    private Long updateBy;
+
+    // getters / setters ...
+}
+```
+
+**第二步：实现 `AuditFieldProvider` 接口**（只需一个 `@Bean`，可选）
+
+```java
+@Bean
+public AuditFieldProvider auditFieldProvider() {
+    // 从当前登录上下文获取操作人 ID，null 表示跳过 BY 字段填充
+    return () -> SecurityContextHolder.getContext().getAuthentication().getPrincipal();
+}
+```
+
+> 若不注册 `AuditFieldProvider` Bean，TIME 字段（`CREATE_TIME` / `UPDATE_TIME`）仍正常填充，BY 字段静默跳过。
+
+#### 支持的字段类型
+
+| 审计字段类型 | 支持的 Java 类型 |
+|---|---|
+| 时间（`CREATE_TIME` / `UPDATE_TIME`） | `LocalDateTime`、`java.util.Date`、`java.sql.Timestamp`、`Long`（毫秒时间戳） |
+| 操作人（`CREATE_BY` / `UPDATE_BY`） | `Long`、`Integer`、`String` |
+
+> 不支持的字段类型会在**启动期**打印 ERROR 日志并跳过，不阻断应用启动。
 
 ---
 
