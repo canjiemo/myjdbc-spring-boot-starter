@@ -1,5 +1,7 @@
 package io.github.canjiemo.base.myjdbc.builder;
 
+import io.github.canjiemo.base.myjdbc.annotation.AuditFill;
+import io.github.canjiemo.base.myjdbc.annotation.MyField;
 import io.github.canjiemo.base.myjdbc.annotation.MyTable;
 import io.github.canjiemo.base.myjdbc.cache.TableCacheManager;
 import io.github.canjiemo.base.myjdbc.error.MyJdbcErrorCode;
@@ -89,6 +91,7 @@ public class TableInfoBuilder implements BeanPostProcessor, Ordered {
                     .setDelColumnName(annotation.delColumn())
                     .setDelFieldName(annotation.delField())
                     .setDelValue(annotation.delValue());
+            buildAuditFields(tableInfo);
             tableInfoMap.put(aClass, tableInfo);
         }
 
@@ -176,6 +179,27 @@ public class TableInfoBuilder implements BeanPostProcessor, Ordered {
                 packages.add(packageName);
             }
         }
+    }
+
+    /**
+     * 扫描 tableInfo.fieldList，将标注了 @MyField(fill!=NONE) 的字段
+     * 分别收集到 auditInsertFields / auditUpdateFields 并设置 setAccessible(true)。
+     * 此方法在启动时调用一次，运行时直接使用缓存列表，无需重复反射扫描。
+     */
+    private void buildAuditFields(TableInfo tableInfo) {
+        List<Field> insertFields = new ArrayList<>();
+        List<Field> updateFields = new ArrayList<>();
+        for (Field field : tableInfo.getFieldList()) {
+            MyField myField = field.getAnnotation(MyField.class);
+            if (myField == null || myField.fill() == AuditFill.NONE) continue;
+            field.setAccessible(true);
+            insertFields.add(field); // INSERT 填充所有审计字段
+            if (myField.fill() == AuditFill.UPDATE_TIME || myField.fill() == AuditFill.UPDATE_BY) {
+                updateFields.add(field); // UPDATE 只填充 UPDATE_* 字段
+            }
+        }
+        if (!insertFields.isEmpty()) tableInfo.setAuditInsertFields(insertFields);
+        if (!updateFields.isEmpty()) tableInfo.setAuditUpdateFields(updateFields);
     }
 
     /**
