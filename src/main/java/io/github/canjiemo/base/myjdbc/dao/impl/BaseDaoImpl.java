@@ -488,7 +488,8 @@ public class BaseDaoImpl implements IBaseDao {
 			return java.sql.Timestamp.valueOf(now);
 		if (fieldType == Long.class || fieldType == long.class)
 			return now.atZone(java.time.ZoneId.systemDefault()).toInstant().toEpochMilli();
-		return now;
+		throw new IllegalArgumentException(
+				"不支持的时间字段类型: " + fieldType.getName() + "，支持 LocalDateTime/Date/Timestamp/Long");
 	}
 
 	/** 将 userId 适配到字段类型（支持 Long / Integer / String）。 */
@@ -498,7 +499,8 @@ public class BaseDaoImpl implements IBaseDao {
 		if (fieldType == Long.class || fieldType == long.class) return Long.parseLong(s);
 		if (fieldType == Integer.class || fieldType == int.class) return Integer.parseInt(s);
 		if (fieldType == String.class) return s;
-		return userId;
+		throw new IllegalArgumentException(
+				"不支持的操作人字段类型: " + fieldType.getName() + "，支持 Long/Integer/String");
 	}
 
 	@Override

@@ -22,6 +22,7 @@ import org.springframework.core.type.filter.AnnotationTypeFilter;
 
 import java.lang.reflect.Field;
 import java.lang.reflect.InaccessibleObjectException;
+import java.time.LocalDateTime;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -201,6 +202,14 @@ public class TableInfoBuilder implements BeanPostProcessor, Ordered {
                         tableInfo.getTableName(), field.getName(), e.getMessage());
                 continue;
             }
+            // 校验字段类型与 fill 策略是否兼容，不兼容则跳过（启动期快速失败，优于运行期静默错误）
+            if (!isAuditFieldTypeCompatible(field, myField.fill())) {
+                log.error("审计字段类型不兼容，已跳过自动填充: {}.{} (type={}, fill={}). "
+                        + "时间字段支持 LocalDateTime/Date/Timestamp/Long，操作人字段支持 Long/Integer/String",
+                        tableInfo.getTableName(), field.getName(),
+                        field.getType().getSimpleName(), myField.fill());
+                continue;
+            }
             insertFields.add(field); // INSERT 填充所有审计字段
             if (myField.fill() == AuditFill.UPDATE_TIME || myField.fill() == AuditFill.UPDATE_BY) {
                 updateFields.add(field); // UPDATE 只填充 UPDATE_* 字段
@@ -208,6 +217,21 @@ public class TableInfoBuilder implements BeanPostProcessor, Ordered {
         }
         if (!insertFields.isEmpty()) tableInfo.setAuditInsertFields(List.copyOf(insertFields));
         if (!updateFields.isEmpty()) tableInfo.setAuditUpdateFields(List.copyOf(updateFields));
+    }
+
+    /** 校验字段类型是否与 fill 策略兼容，不兼容时跳过缓存（启动期快速失败）。 */
+    private static boolean isAuditFieldTypeCompatible(Field field, AuditFill fill) {
+        Class<?> type = field.getType();
+        return switch (fill) {
+            case CREATE_TIME, UPDATE_TIME -> type == LocalDateTime.class
+                    || type == java.util.Date.class
+                    || type == java.sql.Timestamp.class
+                    || type == Long.class || type == long.class;
+            case CREATE_BY, UPDATE_BY -> type == Long.class || type == long.class
+                    || type == Integer.class || type == int.class
+                    || type == String.class;
+            case NONE -> true;
+        };
     }
 
     /**
