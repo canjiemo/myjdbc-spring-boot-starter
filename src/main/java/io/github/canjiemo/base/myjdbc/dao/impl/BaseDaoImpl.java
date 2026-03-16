@@ -270,8 +270,10 @@ public class BaseDaoImpl implements IBaseDao {
 
 	@SuppressWarnings("unchecked")
 	private <T> RowMapper<T> getRowMapper(Class<T> clazz) {
-		return (RowMapper<T>) rowMapperCache.computeIfAbsent(clazz, c ->
-				isWrapClass(c) ? new SingleColumnRowMapper<>(c) : new MyBeanPropertyRowMapper<>(c));
+		return (RowMapper<T>) rowMapperCache.computeIfAbsent(clazz, c -> {
+			if (c == Map.class) return new org.springframework.jdbc.core.ColumnMapRowMapper();
+			return isWrapClass(c) ? new SingleColumnRowMapper<>(c) : new MyBeanPropertyRowMapper<>(c);
+		});
 	}
 
 	/** 租户ID提供者（SPI），集成方注册 Bean 后自动注入；未注册则为 null */
