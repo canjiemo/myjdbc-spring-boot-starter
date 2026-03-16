@@ -428,6 +428,14 @@ public class UserService extends BaseServiceImpl {
             UserPO.class
         );
 
+        // 结果映射到 Map（无需定义 POJO）
+        List<Map> rows = queryListForSql(
+            "SELECT id, user_name, age FROM sys_user WHERE age > :age",
+            params,
+            Map.class
+        );
+        Map row = querySingleForSql("SELECT id, user_name FROM sys_user WHERE id = :id", params, Map.class);
+
         // 分页（自定义 SQL）
         Pager<UserPO> pager = new Pager<>(1, 10);
         queryPageForSql("SELECT * FROM sys_user WHERE age > :age", params, pager, UserPO.class);
@@ -551,7 +559,10 @@ boolean    .exists()       // 存在性判断
 <T> Pager<T>   queryPageForSql(String sql, Map<String, Object> param, Pager<T> pager, Class<T> clazz);
 ```
 
-> **说明：** `queryXxxForSql` 系列方法的返回类型 `<T>` 不要求 `extends MyTableEntity`，可直接映射到 DTO/VO 等任意 POJO。
+> **说明：** `queryXxxForSql` 系列方法的返回类型 `<T>` 不要求 `extends MyTableEntity`，支持三种映射目标：
+> - **POJO / DTO**：框架自动按列名驼峰转换映射
+> - **包装类型**（`String`、`Long` 等）：单列查询直接返回标量值
+> - **`Map.class`**：每行映射为 `Map<String, Object>`，列名作为 key，无需定义 POJO
 
 #### 删除操作
 ```java
