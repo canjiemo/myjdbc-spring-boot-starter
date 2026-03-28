@@ -47,4 +47,5 @@ spring.log
 .env
 
 CLAUDE.md
-.claude
+.claude/memory/
+.claude/settings.local.json

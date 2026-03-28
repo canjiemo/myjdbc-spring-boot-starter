@@ -231,4 +231,23 @@ query()
 
 ---
 
+# 🤖 Claude Code AI 辅助开发
+
+如果你使用 [Claude Code](https://claude.ai/code) 作为 AI 编程助手，可以一键安装本项目的开发 Skill，让 Claude 精准理解 myjdbc 的 API 用法、多租户配置、测试模式等细节：
+
+```bash
+curl -o ~/.claude/skills/myjdbc-dev/SKILL.md --create-dirs \
+  https://raw.githubusercontent.com/canjiemo/myjdbc-spring-boot-starter/master/.claude/skills/myjdbc-dev/SKILL.md
+```
+
+安装后，在你的项目中打开 Claude Code，它将自动掌握：
+
+* `@MyTable` / `@MyField` 注解用法
+* `IBaseService` / `LambdaQueryWrapper` 完整 API
+* 多租户隔离配置与 `TenantContext` 使用
+* 逻辑删除自动注入原理
+* 无 Spring 上下文的单元测试写法
+
+---
+
 # ⭐ 如果这个项目对你有帮助，欢迎 Star！
